@@ -149,13 +149,36 @@ def load_browser_device(control_surface, track, device_name, kind):
         if control_surface.song().view.selected_track != track:
             control_surface.song().view.selected_track = track
         browser = control_surface.application().browser
+        all_collections = [
+            getattr(browser, "sounds", None),
+            getattr(browser, "drums", None),
+            getattr(browser, "instruments", None),
+            getattr(browser, "audio_effects", None),
+            getattr(browser, "midi_effects", None),
+            getattr(browser, "plugins", None),
+            getattr(browser, "samples", None),
+            getattr(browser, "clips", None),
+            getattr(browser, "packs", None),
+            getattr(browser, "user_library", None),
+            getattr(browser, "user_folders", None),
+            getattr(browser, "current_project", None),
+            getattr(browser, "max_for_live", None),
+        ]
+        all_collections = [c for c in all_collections if c is not None]
+
         if kind == "instrument":
-            collection = browser.instruments
+            collections = [getattr(browser, "instruments", None), getattr(browser, "drums", None)]
         elif kind == "midi_effect":
-            collection = browser.midi_effects
+            collections = [getattr(browser, "midi_effects", None)]
+        elif kind == "effect":
+            collections = [getattr(browser, "audio_effects", None)]
         else:
-            collection = browser.audio_effects
-        item = find_browser_item(collection, device_name)
+            collections = all_collections
+        collections = [c for c in collections if c is not None]
+
+        item = find_browser_item_any(collections, device_name)
+        if not item:
+            item = find_browser_item_any(all_collections, device_name)
         if item:
             browser.load_item(item)
             return "ok", None
@@ -171,6 +194,7 @@ def find_browser_item(browser_item, name):
 
     best_item = None
     best_score = 1.0
+    query_tokens = [token for token in query.replace("/", " ").split() if token]
 
     def walk(item):
         nonlocal best_item, best_score
@@ -183,13 +207,17 @@ def find_browser_item(browser_item, name):
                 child_name = str(child.name).lower()
             except Exception:
                 child_name = ""
+            child_tokens = [token for token in child_name.replace("/", " ").split() if token]
             if query == child_name:
                 return child
-            if query in child_name and child_name:
+            if query_tokens and all(token in child_tokens for token in query_tokens):
                 score = 0.0
+            elif query in child_name and child_name:
+                score = 0.1
             else:
                 score = normalized_distance(query, child_name)
-            if score < best_score:
+            is_loadable = bool(getattr(child, "is_loadable", False))
+            if is_loadable and score < best_score:
                 best_score = score
                 best_item = child
             if hasattr(child, "children") and len(child.children) > 0:
@@ -201,6 +229,16 @@ def find_browser_item(browser_item, name):
     exact_or_partial = walk(browser_item)
     if exact_or_partial:
         return exact_or_partial
-    if best_item and best_score <= 0.45:
+    if best_item and best_score <= 0.6:
         return best_item
+    return None
+
+
+def find_browser_item_any(collections, name):
+    if not collections:
+        return None
+    for collection in collections:
+        found = find_browser_item(collection, name)
+        if found:
+            return found
     return None

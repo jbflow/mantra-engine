@@ -316,7 +316,7 @@ const parseStructure = (clause: Clause): Intent | null => {
   if (loadDevice) {
     const rawDevice = loadDevice[1].trim();
     const explicitKind = loadDevice[2] as "instrument" | "effect" | undefined;
-    const inferredKind = /\b(instrument|synth|piano|keys|organ|drum|bass|guitar)\b/i.test(rawDevice)
+    const inferredKind = /\b(instrument|synth|piano|keys|organ|drum|drums|kit|bass|guitar)\b/i.test(rawDevice)
       ? "instrument"
       : "effect";
     return {
