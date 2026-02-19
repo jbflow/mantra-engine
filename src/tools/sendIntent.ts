@@ -3,7 +3,7 @@ import { parseTextToIntents } from "../nlp/intentParser.js";
 
 const args = process.argv.slice(2);
 const urlArgIndex = args.findIndex((arg) => arg.startsWith("ws://") || arg.startsWith("wss://"));
-const url = urlArgIndex >= 0 ? args.splice(urlArgIndex, 1)[0] : "ws://localhost:1978";
+const url = urlArgIndex >= 0 ? args.splice(urlArgIndex, 1)[0] : "ws://localhost:39031";
 const text = args.join(" ") || "play";
 const parsed = parseTextToIntents(text);
 

@@ -228,45 +228,60 @@ const parseTransport = (clause: Clause): Intent | null => {
 
 const parseStructure = (clause: Clause): Intent | null => {
   const target = parseTarget(clause);
-  const createTrack = clause.normalized.match(/create\s+track(?:\s+(\w+))?(?:\s+(audio|midi))?/);
+  const createTrack = clause.normalized.match(
+    /(?:create|add|new)\s+(?:(audio|midi)\s+)?track(?:\s+(?:for|named)?\s*([\w_-]+))?/
+  );
   if (createTrack) {
-    const role = (createTrack[1] ?? "drums") as Role;
-    const type = createTrack[2] as "audio" | "midi" | undefined;
+    const inferredRole = roleValues.find((value) => clause.normalized.includes(value)) ?? "drums";
+    const requestedRole = (createTrack[2] ?? "").toLowerCase();
+    const role = (roleValues.includes(requestedRole as Role) ? requestedRole : inferredRole) as Role;
+    const type = createTrack[1] as "audio" | "midi" | undefined;
     return { domain: "structure", intent: { action: "create_track", role, type } };
   }
-  if (/select\s+track/.test(clause.normalized) && target) {
-    return { domain: "structure", intent: { action: "select_track", target } };
+
+  const resolvedTarget = target ?? {};
+  if (/select\s+track|select\s+\w+/.test(clause.normalized)) {
+    return { domain: "structure", intent: { action: "select_track", target: resolvedTarget } };
   }
-  if (/arm\s+track/.test(clause.normalized) && target) {
-    return { domain: "structure", intent: { action: "arm_track", target } };
+  if (/arm\s+track|arm\s+\w+/.test(clause.normalized)) {
+    return { domain: "structure", intent: { action: "arm_track", target: resolvedTarget } };
   }
-  if (/disarm\s+track/.test(clause.normalized) && target) {
-    return { domain: "structure", intent: { action: "disarm_track", target } };
+  if (/disarm\s+track|disarm\s+\w+/.test(clause.normalized)) {
+    return { domain: "structure", intent: { action: "disarm_track", target: resolvedTarget } };
   }
-  if (/\bmute\b/.test(clause.normalized) && target) {
-    return { domain: "structure", intent: { action: "mute", target } };
+  if (/\bmute\b/.test(clause.normalized)) {
+    return { domain: "structure", intent: { action: "mute", target: resolvedTarget } };
   }
-  if (/\bunmute\b/.test(clause.normalized) && target) {
-    return { domain: "structure", intent: { action: "unmute", target } };
+  if (/\bunmute\b/.test(clause.normalized)) {
+    return { domain: "structure", intent: { action: "unmute", target: resolvedTarget } };
   }
-  if (/\bsolo\b/.test(clause.normalized) && target) {
-    return { domain: "structure", intent: { action: "solo", target } };
+  if (/\bsolo\b/.test(clause.normalized)) {
+    return { domain: "structure", intent: { action: "solo", target: resolvedTarget } };
   }
-  if (/\bunsolo\b/.test(clause.normalized) && target) {
-    return { domain: "structure", intent: { action: "unsolo", target } };
+  if (/\bunsolo\b/.test(clause.normalized)) {
+    return { domain: "structure", intent: { action: "unsolo", target: resolvedTarget } };
   }
-  const loadDevice = clause.raw.match(/load\s+device\s+"?([\w\s_-]+)"?(?:\s+(instrument|effect))?/i);
-  if (loadDevice && target) {
+
+  const loadDevice = clause.raw.match(
+    /(?:load|add|insert)\s+(?:device\s+)?"?([\w\s_-]+)"?(?:\s+(instrument|effect))?/i
+  );
+  if (loadDevice) {
+    const rawDevice = loadDevice[1].trim();
+    const explicitKind = loadDevice[2] as "instrument" | "effect" | undefined;
+    const inferredKind = /\b(instrument|synth|piano|keys|organ|drum|bass|guitar)\b/i.test(rawDevice)
+      ? "instrument"
+      : "effect";
     return {
       domain: "structure",
       intent: {
         action: "load_device",
-        target,
-        device: loadDevice[1].trim(),
-        kind: (loadDevice[2] as "instrument" | "effect" | undefined) ?? "effect"
+        target: resolvedTarget,
+        device: rawDevice,
+        kind: explicitKind ?? inferredKind
       }
     };
   }
+
   return null;
 };
 
