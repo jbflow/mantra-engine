@@ -15,6 +15,11 @@ class FocusState:
 
     def resolve_target(self, intent_payload):
         target = intent_payload.get("target") if isinstance(intent_payload, dict) else None
-        if target:
-            return target
+        if isinstance(target, dict):
+            has_value = any(
+                target.get(key)
+                for key in ["role", "role_category", "role_detail", "track_name", "track_id"]
+            )
+            if has_value:
+                return target
         return self.last_target

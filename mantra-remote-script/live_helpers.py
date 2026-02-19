@@ -23,22 +23,59 @@ def clamp(value, min_value, max_value):
     return max(min_value, min(value, max_value))
 
 
+def levenshtein_distance(a, b):
+    a = a or ""
+    b = b or ""
+    if a == b:
+        return 0
+    if not a:
+        return len(b)
+    if not b:
+        return len(a)
+    previous_row = list(range(len(b) + 1))
+    for i, ca in enumerate(a, start=1):
+        current_row = [i]
+        for j, cb in enumerate(b, start=1):
+            insertions = previous_row[j] + 1
+            deletions = current_row[j - 1] + 1
+            substitutions = previous_row[j - 1] + (ca != cb)
+            current_row.append(min(insertions, deletions, substitutions))
+        previous_row = current_row
+    return previous_row[-1]
+
+
+def normalized_distance(a, b):
+    if not a and not b:
+        return 0.0
+    return float(levenshtein_distance(a, b)) / float(max(len(a), len(b), 1))
+
+
 def find_track(song, target):
     if not target:
         return song.view.selected_track if hasattr(song.view, "selected_track") else None
     track_name = target.get("track_name") if isinstance(target, dict) else None
     role = target.get("role") if isinstance(target, dict) else None
     tracks = list(song.tracks)
+    visible_tracks = list(song.visible_tracks) if hasattr(song, "visible_tracks") else tracks
+    return_tracks = list(song.return_tracks) if hasattr(song, "return_tracks") else []
+    all_tracks = tracks + return_tracks
+
+    if isinstance(track_name, str) and track_name.strip().isdigit():
+        index = int(track_name.strip()) - 1
+        if 0 <= index < len(visible_tracks):
+            return visible_tracks[index]
+        if 0 <= index < len(all_tracks):
+            return all_tracks[index]
 
     if track_name:
-        for track in tracks:
+        for track in all_tracks:
             if track.name.lower() == track_name.lower():
                 return track
     if role:
-        for track in tracks:
+        for track in all_tracks:
             if role.lower() in track.name.lower():
                 return track
-    return None
+    return song.view.selected_track if hasattr(song.view, "selected_track") else None
 
 
 def set_key_signature(song, key, scale):
@@ -128,15 +165,42 @@ def load_browser_device(control_surface, track, device_name, kind):
 
 
 def find_browser_item(browser_item, name):
-    name = str(name).lower()
-    try:
-        for item in list(browser_item.children):
-            if name in item.name.lower():
-                return item
-            if hasattr(item, "children") and len(item.children) > 0:
-                found = find_browser_item(item, name)
+    query = str(name or "").strip().lower()
+    if not query:
+        return None
+
+    best_item = None
+    best_score = 1.0
+
+    def walk(item):
+        nonlocal best_item, best_score
+        try:
+            children = list(item.children)
+        except Exception:
+            children = []
+        for child in children:
+            try:
+                child_name = str(child.name).lower()
+            except Exception:
+                child_name = ""
+            if query == child_name:
+                return child
+            if query in child_name and child_name:
+                score = 0.0
+            else:
+                score = normalized_distance(query, child_name)
+            if score < best_score:
+                best_score = score
+                best_item = child
+            if hasattr(child, "children") and len(child.children) > 0:
+                found = walk(child)
                 if found:
                     return found
-    except Exception:
         return None
+
+    exact_or_partial = walk(browser_item)
+    if exact_or_partial:
+        return exact_or_partial
+    if best_item and best_score <= 0.45:
+        return best_item
     return None

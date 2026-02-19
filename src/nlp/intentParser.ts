@@ -129,6 +129,25 @@ const subdivisions = [
 
 type Clause = { raw: string; normalized: string };
 
+const numberWords: Record<string, number> = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+  eleven: 11,
+  twelve: 12,
+  thirteen: 13,
+  fourteen: 14,
+  fifteen: 15,
+  sixteen: 16
+};
+
 const splitClauses = (text: string): Clause[] =>
   text
     .split(/(?:\.|\n|;|\band\b|\bthen\b)/gi)
@@ -139,7 +158,15 @@ const parseTarget = (clause: Clause): TargetRef | undefined => {
   const target: TargetRef = {};
   const trackMatch = clause.raw.match(/track\s+"?([\w\s_-]+)"?/i);
   if (trackMatch) {
-    target.track_name = trackMatch[1].trim();
+    const rawTrack = trackMatch[1].trim();
+    const numeric = Number(rawTrack);
+    if (Number.isFinite(numeric)) {
+      target.track_name = String(numeric);
+    } else if (numberWords[rawTrack.toLowerCase()]) {
+      target.track_name = String(numberWords[rawTrack.toLowerCase()]);
+    } else {
+      target.track_name = rawTrack;
+    }
   }
 
   const role = roleValues.find((value) => clause.normalized.includes(value));
@@ -159,6 +186,23 @@ const parseNumber = (value?: string): number | undefined => {
   if (!value) return undefined;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
+};
+
+const parseTrackIndex = (value?: string): string | undefined => {
+  if (!value) return undefined;
+  const normalized = value.trim().toLowerCase();
+  const numeric = Number(normalized);
+  if (Number.isFinite(numeric)) return String(numeric);
+  if (numberWords[normalized]) return String(numberWords[normalized]);
+  return undefined;
+};
+
+const inferTargetFromIndex = (clause: Clause): TargetRef | undefined => {
+  const indexMatch = clause.normalized.match(
+    /(?:track\s*)?(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|\d+)/
+  );
+  const index = parseTrackIndex(indexMatch?.[1]);
+  return index ? { track_name: index } : undefined;
 };
 
 const parseTransport = (clause: Clause): Intent | null => {
@@ -227,15 +271,19 @@ const parseTransport = (clause: Clause): Intent | null => {
 };
 
 const parseStructure = (clause: Clause): Intent | null => {
-  const target = parseTarget(clause);
-  const createTrack = clause.normalized.match(
-    /(?:create|add|new)\s+(?:(audio|midi)\s+)?track(?:\s+(?:for|named)?\s*([\w_-]+))?/
+  const target = parseTarget(clause) ?? inferTargetFromIndex(clause);
+  const createTrackTrailingRole = clause.normalized.match(
+    /(?:create|add|new)\s+(?:(audio|midi)\s+)?track(?:\s+(?:for|named)?\s*"?([\w\s_-]+)"?)?/
   );
-  if (createTrack) {
+  const createTrackLeadingRole = clause.normalized.match(
+    /(?:create|add|new)\s+(?:(audio|midi)\s+)?([\w_-]+)\s+track/
+  );
+  const createTrackMatch = createTrackTrailingRole ?? createTrackLeadingRole;
+  if (createTrackMatch) {
     const inferredRole = roleValues.find((value) => clause.normalized.includes(value)) ?? "drums";
-    const requestedRole = (createTrack[2] ?? "").toLowerCase();
-    const role = (roleValues.includes(requestedRole as Role) ? requestedRole : inferredRole) as Role;
-    const type = createTrack[1] as "audio" | "midi" | undefined;
+    const rawRole = (createTrackMatch[2] ?? "").trim().toLowerCase();
+    const role = (roleValues.includes(rawRole as Role) ? rawRole : inferredRole) as Role;
+    const type = createTrackMatch[1] as "audio" | "midi" | undefined;
     return { domain: "structure", intent: { action: "create_track", role, type } };
   }
 
@@ -252,13 +300,13 @@ const parseStructure = (clause: Clause): Intent | null => {
   if (/\bmute\b/.test(clause.normalized)) {
     return { domain: "structure", intent: { action: "mute", target: resolvedTarget } };
   }
-  if (/\bunmute\b/.test(clause.normalized)) {
+  if (/\b(unmute|un-mute|unumute)\b/.test(clause.normalized)) {
     return { domain: "structure", intent: { action: "unmute", target: resolvedTarget } };
   }
   if (/\bsolo\b/.test(clause.normalized)) {
     return { domain: "structure", intent: { action: "solo", target: resolvedTarget } };
   }
-  if (/\bunsolo\b/.test(clause.normalized)) {
+  if (/\b(unsolo|un-solo)\b/.test(clause.normalized)) {
     return { domain: "structure", intent: { action: "unsolo", target: resolvedTarget } };
   }
 
