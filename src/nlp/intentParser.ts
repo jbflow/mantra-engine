@@ -6,8 +6,15 @@ import {
   type TargetRef
 } from "mantra-intent-protocol";
 
+type ExtendedStructureIntent =
+  | { domain: "structure"; intent: { action: "rename_track"; target: TargetRef; name: string } }
+  | { domain: "structure"; intent: { action: "delete_track"; target: TargetRef } }
+  | { domain: "structure"; intent: { action: "duplicate_track"; target: TargetRef } };
+
+type AnyIntent = Intent | ExtendedStructureIntent;
+
 export type ParseResult = {
-  intents: Intent[];
+  intents: AnyIntent[];
   errors?: string[];
 };
 
@@ -129,6 +136,15 @@ const subdivisions = [
 
 type Clause = { raw: string; normalized: string };
 
+const customStructureActions = new Set(["rename_track", "delete_track", "duplicate_track"]);
+
+const isCustomStructureIntent = (intent: AnyIntent): boolean => {
+  if (!intent || typeof intent !== "object") return false;
+  if (intent.domain !== "structure") return false;
+  const action = (intent as any).intent?.action;
+  return customStructureActions.has(action);
+};
+
 const numberWords: Record<string, number> = {
   one: 1,
   two: 2,
@@ -156,7 +172,9 @@ const splitClauses = (text: string): Clause[] =>
 
 const parseTarget = (clause: Clause): TargetRef | undefined => {
   const target: TargetRef = {};
-  const trackMatch = clause.raw.match(/track\s+"?([\w\s_-]+)"?/i);
+  const trackMatch = clause.raw.match(
+    /track\s+"?([\w\s_-]+?)"?(?:\s+(?:to|named|for|with|in|on)\b|$)/i
+  );
   if (trackMatch) {
     const rawTrack = trackMatch[1].trim();
     const numeric = Number(rawTrack);
@@ -205,7 +223,7 @@ const inferTargetFromIndex = (clause: Clause): TargetRef | undefined => {
   return index ? { track_name: index } : undefined;
 };
 
-const parseTransport = (clause: Clause): Intent | null => {
+const parseTransport = (clause: Clause): AnyIntent | null => {
   if (/\bplay\b/.test(clause.normalized)) {
     return { domain: "transport", intent: { action: "play" } };
   }
@@ -270,13 +288,13 @@ const parseTransport = (clause: Clause): Intent | null => {
   return null;
 };
 
-const parseStructure = (clause: Clause): Intent | null => {
+const parseStructure = (clause: Clause): AnyIntent | null => {
   const target = parseTarget(clause) ?? inferTargetFromIndex(clause);
   const createTrackTrailingRole = clause.normalized.match(
-    /(?:create|add|new)\s+(?:(audio|midi)\s+)?track(?:\s+(?:for|named)?\s*"?([\w\s_-]+)"?)?/
+    /(?:create|add|new)\s+(?:(?:a|an)\s+)?(?:(audio|midi)\s+)?track(?:\s+(?:for|named)?\s*"?([\w\s_-]+)"?)?/
   );
   const createTrackLeadingRole = clause.normalized.match(
-    /(?:create|add|new)\s+(?:(audio|midi)\s+)?([\w_-]+)\s+track/
+    /(?:create|add|new)\s+(?:(?:a|an)\s+)?(?:(audio|midi)\s+)?([\w_-]+)\s+track/
   );
   const createTrackMatch = createTrackTrailingRole ?? createTrackLeadingRole;
   if (createTrackMatch) {
@@ -310,8 +328,34 @@ const parseStructure = (clause: Clause): Intent | null => {
     return { domain: "structure", intent: { action: "unsolo", target: resolvedTarget } };
   }
 
+  const renameMatch = clause.raw.match(
+    /(?:rename|name)\s+track\s+"?([\w\s_-]+?)"?\s+to\s+"?([\w\s_-]+?)"?$/i
+  );
+  if (renameMatch) {
+    const trackRef = parseTrackIndex(renameMatch[1]) ?? renameMatch[1].trim();
+    const renameTarget = trackRef ? { track_name: String(trackRef) } : resolvedTarget;
+    return {
+      domain: "structure",
+      intent: { action: "rename_track", target: renameTarget, name: renameMatch[2].trim() }
+    };
+  }
+
+  const deleteMatch = clause.raw.match(/(?:delete|remove)\s+track\s+"?([\w\s_-]+)"?$/i);
+  if (deleteMatch) {
+    const trackRef = parseTrackIndex(deleteMatch[1]) ?? deleteMatch[1].trim();
+    const deleteTarget = trackRef ? { track_name: String(trackRef) } : resolvedTarget;
+    return { domain: "structure", intent: { action: "delete_track", target: deleteTarget } };
+  }
+
+  const duplicateMatch = clause.raw.match(/duplicate\s+track\s+"?([\w\s_-]+)"?$/i);
+  if (duplicateMatch) {
+    const trackRef = parseTrackIndex(duplicateMatch[1]) ?? duplicateMatch[1].trim();
+    const duplicateTarget = trackRef ? { track_name: String(trackRef) } : resolvedTarget;
+    return { domain: "structure", intent: { action: "duplicate_track", target: duplicateTarget } };
+  }
+
   const loadDevice = clause.raw.match(
-    /(?:load|add|insert)\s+(?:device\s+)?"?([\w\s_-]+)"?(?:\s+(instrument|effect))?/i
+    /(?:load|add|insert)\s+(?:device\s+)?"?([\w\s_-]+?)"?(?:\s+on\s+track\s+[\w\s_-]+)?(?:\s+(instrument|effect))?/i
   );
   if (loadDevice) {
     const rawDevice = loadDevice[1].trim();
@@ -333,7 +377,7 @@ const parseStructure = (clause: Clause): Intent | null => {
   return null;
 };
 
-const parseMusic = (clause: Clause): Intent | null => {
+const parseMusic = (clause: Clause): AnyIntent | null => {
   const target = parseTarget(clause);
   const quantize = clause.normalized.match(/quantize(?:\s+.*)?(?:\s+(?:strength|amount)?\s*(0(?:\.\d+)?|1(?:\.0+)?))?/);
   if (quantize && target) {
@@ -358,7 +402,7 @@ const parseMusic = (clause: Clause): Intent | null => {
   return null;
 };
 
-const parseHarmony = (clause: Clause): Intent | null => {
+const parseHarmony = (clause: Clause): AnyIntent | null => {
   const target = parseTarget(clause);
   const setKey = clause.normalized.match(/set\s+key\s+([a-g](?:#|b)?)(?:\s+([a-z_]+))?/);
   if (setKey) {
@@ -407,7 +451,7 @@ const parseHarmony = (clause: Clause): Intent | null => {
   return null;
 };
 
-const parseRhythm = (clause: Clause): Intent | null => {
+const parseRhythm = (clause: Clause): AnyIntent | null => {
   const target = parseTarget(clause);
   const groove = clause.normalized.match(/groove\s+(straight|swing|shuffle|triplet|dotted)/);
   if (groove) {
@@ -440,7 +484,7 @@ const parseRhythm = (clause: Clause): Intent | null => {
   return null;
 };
 
-const parsePerformance = (clause: Clause): Intent | null => {
+const parsePerformance = (clause: Clause): AnyIntent | null => {
   const target = parseTarget(clause);
   const scene = clause.raw.match(/trigger\s+scene\s+"?([\w\s_-]+)"?/i);
   if (scene) {
@@ -456,7 +500,7 @@ const parsePerformance = (clause: Clause): Intent | null => {
   return null;
 };
 
-const parseTimbre = (clause: Clause): Intent | null => {
+const parseTimbre = (clause: Clause): AnyIntent | null => {
   const target = parseTarget(clause);
   const adjectiveMatches = Object.keys(timbreAdjectives).filter((key) =>
     clause.normalized.includes(key)
@@ -496,7 +540,7 @@ const parseTimbre = (clause: Clause): Intent | null => {
   };
 };
 
-const parseClause = (clause: Clause): Intent | null =>
+const parseClause = (clause: Clause): AnyIntent | null =>
   parseTransport(clause) ||
   parseStructure(clause) ||
   parseMusic(clause) ||
@@ -506,7 +550,7 @@ const parseClause = (clause: Clause): Intent | null =>
   parseTimbre(clause);
 
 export const parseTextToIntents = (text: string): ParseResult => {
-  const intents: Intent[] = [];
+  const intents: AnyIntent[] = [];
   const errors: string[] = [];
 
   for (const clause of splitClauses(text)) {
@@ -518,6 +562,10 @@ export const parseTextToIntents = (text: string): ParseResult => {
 
     const validation = IntentSchema.safeParse(parsed);
     if (!validation.success) {
+      if (isCustomStructureIntent(parsed)) {
+        intents.push(parsed);
+        continue;
+      }
       errors.push(`Invalid intent from clause: "${clause.raw.trim()}"`);
       continue;
     }

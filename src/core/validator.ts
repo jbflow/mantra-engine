@@ -12,6 +12,16 @@ export type ValidationResult = {
   issues?: unknown[];
 };
 
+const customStructureActions = new Set(["rename_track", "delete_track", "duplicate_track"]);
+
+const isCustomStructureIntent = (item: unknown): item is { domain: string; intent: { action: string } } => {
+  if (!item || typeof item !== "object") return false;
+  const candidate = item as { domain?: string; intent?: { action?: string } };
+  if (candidate.domain !== "structure") return false;
+  const action = candidate.intent?.action;
+  return typeof action === "string" && customStructureActions.has(action);
+};
+
 const normalizeInput = (
   payload: Intent | Intent[] | Envelope | Envelope[]
 ): Array<Intent | Envelope> => (Array.isArray(payload) ? payload : [payload]);
@@ -25,6 +35,18 @@ export const validateAndNormalize = (
   const issues: unknown[] = [];
 
   for (const item of items) {
+    if (isCustomStructureIntent(item)) {
+      const intent = item as Intent;
+      envelopes.push(
+        makeEnvelope({
+          source: source ?? "api",
+          domain: intent.domain,
+          intent: intent.intent
+        })
+      );
+      continue;
+    }
+
     const envelopeParse = EnvelopeSchema.safeParse(item);
     if (envelopeParse.success) {
       envelopes.push(envelopeParse.data);
