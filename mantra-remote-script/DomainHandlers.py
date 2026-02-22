@@ -1,53 +1,33 @@
-from .live_helpers import (
-    adjust_timbre,
-    find_clip_slot,
-    find_scene,
-    find_track,
-    load_browser_device,
-    set_key_signature,
-)
+from .TrackService import TrackService
+from .KeyService import KeyService
+from .TimbreService import TimbreService
+from .BrowserService import BrowserService
 
 
-class IntentRouter:
-    def __init__(self, control_surface, transport_actions, focus_state):
+class DomainServices:
+    def __init__(self):
+        self.track = TrackService()
+        self.key = KeyService()
+        self.timbre = TimbreService()
+        self.browser = BrowserService()
+
+
+class BaseDomainHandler:
+    def __init__(self, control_surface, services):
         self._control_surface = control_surface
-        self._transport = transport_actions
-        self._focus = focus_state
+        self._services = services
 
     @property
     def song(self):
         return self._control_surface.song()
 
-    def route_intent(self, intent):
-        if not isinstance(intent, dict):
-            return "error", {"message": "Intent must be an object"}
-        domain = intent.get("domain")
-        payload = intent.get("intent")
-        if not domain or not isinstance(payload, dict):
-            return "error", {"message": "Invalid intent shape"}
 
-        action = payload.get("action")
-        target = self._focus.resolve_target(payload)
-        self._focus.update(domain=domain, target=target)
+class TransportHandler(BaseDomainHandler):
+    def __init__(self, control_surface, transport_actions, services):
+        super(TransportHandler, self).__init__(control_surface, services)
+        self._transport = transport_actions
 
-        if domain == "transport":
-            return self._handle_transport(action, payload)
-        if domain == "structure":
-            return self._handle_structure(action, payload, target)
-        if domain == "music":
-            return self._handle_music(action, payload, target)
-        if domain == "harmony":
-            return self._handle_harmony(action, payload)
-        if domain == "rhythm":
-            return self._handle_rhythm(action, payload)
-        if domain == "performance":
-            return self._handle_performance(action, payload, target)
-        if domain == "timbre":
-            return self._handle_timbre(action, payload, target)
-
-        return "error", {"message": f"Unsupported domain: {domain}"}
-
-    def _handle_transport(self, action, payload):
+    def handle(self, action, payload):
         try:
             if action == "play":
                 self._transport.play()
@@ -115,18 +95,51 @@ class IntentRouter:
 
         return "error", {"message": f"Unsupported transport action: {action}"}
 
-    def _handle_structure(self, action, payload, target):
-        track = find_track(self.song, target)
+
+class StructureHandler(BaseDomainHandler):
+    def handle(self, action, payload, target):
+        track = self._services.track.find_track(self.song, target)
         try:
             if action == "create_track":
                 track_type = payload.get("type")
+                index = len(self.song.tracks) if hasattr(self.song, "tracks") else 0
                 if track_type == "midi":
-                    self.song.create_midi_track()
+                    try:
+                        self.song.create_midi_track(index)
+                    except TypeError:
+                        self.song.create_midi_track()
                 else:
-                    self.song.create_audio_track()
+                    try:
+                        self.song.create_audio_track(index)
+                    except TypeError:
+                        self.song.create_audio_track()
+                role = payload.get("role")
+                if role and hasattr(self.song, "tracks") and len(self.song.tracks) > 0:
+                    self.song.tracks[-1].name = str(role).capitalize()
                 return "ok", None
             if not track:
                 return "error", {"message": "Target track not found"}
+            if action == "rename_track":
+                name = payload.get("name") or payload.get("new_name")
+                if not name:
+                    return "error", {"message": "Missing track name"}
+                track.name = str(name)
+                return "ok", None
+            if action == "delete_track":
+                track_type, index = self._services.track.locate_track(self.song, track)
+                if track_type == "track":
+                    self.song.delete_track(index)
+                    return "ok", None
+                if track_type == "return" and hasattr(self.song, "delete_return_track"):
+                    self.song.delete_return_track(index)
+                    return "ok", None
+                return "error", {"message": "Track cannot be deleted"}
+            if action == "duplicate_track":
+                track_type, index = self._services.track.locate_track(self.song, track)
+                if track_type == "track" and hasattr(self.song, "duplicate_track"):
+                    self.song.duplicate_track(index)
+                    return "ok", None
+                return "error", {"message": "Track cannot be duplicated"}
             if action == "select_track":
                 self.song.view.selected_track = track
                 return "ok", None
@@ -153,13 +166,17 @@ class IntentRouter:
                 kind = payload.get("kind")
                 if not device_name:
                     return "error", {"message": "Missing device name"}
-                return load_browser_device(self._control_surface, track, device_name, kind)
+                return self._services.browser.load_browser_device(
+                    self._control_surface, track, device_name, kind
+                )
         except Exception as e:
             return "error", {"message": str(e)}
 
         return "error", {"message": f"Unsupported structure action: {action}"}
 
-    def _handle_music(self, action, payload, target):
+
+class MusicHandler(BaseDomainHandler):
+    def handle(self, action, payload, target):
         try:
             if action == "quantize":
                 strength = payload.get("strength", 0.8)
@@ -178,18 +195,20 @@ class IntentRouter:
             if action == "set_key_signature":
                 key = payload.get("key")
                 scale = payload.get("scale")
-                return set_key_signature(self.song, key, scale)
+                return self._services.key.set_key_signature(self.song, key, scale)
         except Exception as e:
             return "error", {"message": str(e)}
 
         return "error", {"message": f"Unsupported music action: {action}"}
 
-    def _handle_harmony(self, action, payload):
+
+class HarmonyHandler(BaseDomainHandler):
+    def handle(self, action, payload):
         try:
             if action == "set_key":
                 tonic = payload.get("tonic")
                 scale = payload.get("scale")
-                return set_key_signature(self.song, tonic, scale)
+                return self._services.key.set_key_signature(self.song, tonic, scale)
             if action in ["set_chord", "set_chord_progression", "set_pitch_range"]:
                 return "error", {"message": f"Harmony action not supported in Live API: {action}"}
         except Exception as e:
@@ -197,7 +216,9 @@ class IntentRouter:
 
         return "error", {"message": f"Unsupported harmony action: {action}"}
 
-    def _handle_rhythm(self, action, payload):
+
+class RhythmHandler(BaseDomainHandler):
+    def handle(self, action, payload):
         try:
             if action == "set_swing" and hasattr(self.song, "swing_amount"):
                 amount = payload.get("amount")
@@ -208,21 +229,23 @@ class IntentRouter:
         except Exception as e:
             return "error", {"message": str(e)}
 
-    def _handle_performance(self, action, payload, target):
+
+class PerformanceHandler(BaseDomainHandler):
+    def handle(self, action, payload, target):
         try:
             if action == "trigger_scene":
                 scene_name = payload.get("scene_name")
-                scene = find_scene(self.song, scene_name)
+                scene = self._services.track.find_scene(self.song, scene_name)
                 if scene:
                     scene.fire()
                     return "ok", None
                 return "error", {"message": "Scene not found"}
             if action == "trigger_clip":
                 clip_name = payload.get("clip_name")
-                track = find_track(self.song, target)
+                track = self._services.track.find_track(self.song, target)
                 if not track:
                     return "error", {"message": "Target track not found"}
-                clip_slot = find_clip_slot(track, clip_name)
+                clip_slot = self._services.track.find_clip_slot(track, clip_name)
                 if clip_slot:
                     clip_slot.fire()
                     return "ok", None
@@ -232,15 +255,17 @@ class IntentRouter:
 
         return "error", {"message": f"Unsupported performance action: {action}"}
 
-    def _handle_timbre(self, action, payload, target):
+
+class TimbreHandler(BaseDomainHandler):
+    def handle(self, action, payload, target):
         try:
-            track = find_track(self.song, target)
+            track = self._services.track.find_track(self.song, target)
             if not track:
                 return "error", {"message": "Target track not found"}
             if action == "adjust":
                 attribute = payload.get("attribute")
                 amount = payload.get("amount")
-                return adjust_timbre(track, attribute, amount)
+                return self._services.timbre.adjust_timbre(track, attribute, amount)
             if action == "adjust_many":
                 changes = payload.get("changes")
                 if not isinstance(changes, list):
@@ -248,7 +273,7 @@ class IntentRouter:
                 for change in changes:
                     attribute = change.get("attribute") if isinstance(change, dict) else None
                     amount = change.get("amount") if isinstance(change, dict) else None
-                    adjust_timbre(track, attribute, amount)
+                    self._services.timbre.adjust_timbre(track, attribute, amount)
                 return "ok", None
         except Exception as e:
             return "error", {"message": str(e)}

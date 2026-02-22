@@ -5,8 +5,8 @@ from _Framework.ControlSurface import ControlSurface
 from .Socket import Socket
 from .Logging import logger
 from .TransportActions import TransportActions
-from .focus_state import FocusState
-from .intent_router import IntentRouter
+from .FocusState import FocusState
+from .IntentRouter import IntentRouter
 
 
 class Mantra(ControlSurface):

@@ -1,7 +1,8 @@
-from .live_helpers import clamp
-
-
 class TransportActions:
+    @staticmethod
+    def clamp(value, min_value, max_value):
+        return max(min_value, min(value, max_value))
+
     def __init__(self, c_instance):
         self._c_instance = c_instance
         self._song = c_instance.song()
@@ -46,5 +47,5 @@ class TransportActions:
 
     def set_tempo(self, bpm):
         if hasattr(self.song, "tempo"):
-            safe_bpm = clamp(float(bpm), 20.0, 999.0)
+            safe_bpm = self.clamp(float(bpm), 20.0, 999.0)
             self.song.tempo = safe_bpm
