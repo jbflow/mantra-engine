@@ -2,19 +2,13 @@ import {
   IntentSchema,
   type Domain,
   type Intent,
+  type PitchClass,
   type Role,
   type TargetRef
 } from "mantra-intent-protocol";
 
-type ExtendedStructureIntent =
-  | { domain: "structure"; intent: { action: "rename_track"; target: TargetRef; name: string } }
-  | { domain: "structure"; intent: { action: "delete_track"; target: TargetRef } }
-  | { domain: "structure"; intent: { action: "duplicate_track"; target: TargetRef } };
-
-type AnyIntent = Intent | ExtendedStructureIntent;
-
 export type ParseResult = {
-  intents: AnyIntent[];
+  intents: Intent[];
   errors?: string[];
 };
 
@@ -136,15 +130,6 @@ const subdivisions = [
 
 type Clause = { raw: string; normalized: string };
 
-const customStructureActions = new Set(["rename_track", "delete_track", "duplicate_track"]);
-
-const isCustomStructureIntent = (intent: AnyIntent): boolean => {
-  if (!intent || typeof intent !== "object") return false;
-  if (intent.domain !== "structure") return false;
-  const action = (intent as any).intent?.action;
-  return customStructureActions.has(action);
-};
-
 const numberWords: Record<string, number> = {
   one: 1,
   two: 2,
@@ -206,6 +191,17 @@ const parseNumber = (value?: string): number | undefined => {
   return Number.isFinite(parsed) ? parsed : undefined;
 };
 
+const normalizePitchClass = (value?: string): PitchClass | undefined => {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const letter = trimmed[0].toUpperCase();
+  const accidental = trimmed.slice(1, 2);
+  if (accidental === "#") return `${letter}#` as PitchClass;
+  if (accidental === "b" || accidental === "B") return `${letter}b` as PitchClass;
+  return letter as PitchClass;
+};
+
 const parseTrackIndex = (value?: string): string | undefined => {
   if (!value) return undefined;
   const normalized = value.trim().toLowerCase();
@@ -223,7 +219,7 @@ const inferTargetFromIndex = (clause: Clause): TargetRef | undefined => {
   return index ? { track_name: index } : undefined;
 };
 
-const parseTransport = (clause: Clause): AnyIntent | null => {
+const parseTransport = (clause: Clause): Intent | null => {
   if (/\bplay\b/.test(clause.normalized)) {
     return { domain: "transport", intent: { action: "play" } };
   }
@@ -288,7 +284,7 @@ const parseTransport = (clause: Clause): AnyIntent | null => {
   return null;
 };
 
-const parseStructure = (clause: Clause): AnyIntent | null => {
+const parseStructure = (clause: Clause): Intent | null => {
   const target = parseTarget(clause) ?? inferTargetFromIndex(clause);
   const createTrackTrailingRole = clause.normalized.match(
     /(?:create|add|new)\s+(?:(?:a|an)\s+)?(?:(audio|midi)\s+)?track(?:\s+(?:for|named)?\s*"?([\w\s_-]+)"?)?/
@@ -344,7 +340,7 @@ const parseStructure = (clause: Clause): AnyIntent | null => {
   if (deleteMatch) {
     const trackRef = parseTrackIndex(deleteMatch[1]) ?? deleteMatch[1].trim();
     const deleteTarget = trackRef ? { track_name: String(trackRef) } : resolvedTarget;
-    return { domain: "structure", intent: { action: "delete_track", target: deleteTarget } };
+    return { domain: "structure", intent: { action: "remove_track", target: deleteTarget } };
   }
 
   const duplicateMatch = clause.raw.match(/duplicate\s+track\s+"?([\w\s_-]+)"?$/i);
@@ -377,7 +373,7 @@ const parseStructure = (clause: Clause): AnyIntent | null => {
   return null;
 };
 
-const parseMusic = (clause: Clause): AnyIntent | null => {
+const parseMusic = (clause: Clause): Intent | null => {
   const target = parseTarget(clause);
   const quantize = clause.normalized.match(/quantize(?:\s+.*)?(?:\s+(?:strength|amount)?\s*(0(?:\.\d+)?|1(?:\.0+)?))?/);
   if (quantize && target) {
@@ -402,15 +398,17 @@ const parseMusic = (clause: Clause): AnyIntent | null => {
   return null;
 };
 
-const parseHarmony = (clause: Clause): AnyIntent | null => {
+const parseHarmony = (clause: Clause): Intent | null => {
   const target = parseTarget(clause);
   const setKey = clause.normalized.match(/set\s+key\s+([a-g](?:#|b)?)(?:\s+([a-z_]+))?/);
   if (setKey) {
     const scale = (setKey[2] as ScaleType | undefined) ?? "major";
     const scaleValue = scaleValues.includes(scale) ? scale : "major";
+    const tonic = normalizePitchClass(setKey[1]);
+    if (!tonic) return null;
     return {
       domain: "harmony",
-      intent: { action: "set_key", tonic: setKey[1].toUpperCase(), scale: scaleValue }
+      intent: { action: "set_key", tonic, scale: scaleValue }
     };
   }
   const setChord = clause.raw.match(/set\s+chord\s+"?([\w#b\/\s]+)"?/i);
@@ -451,7 +449,7 @@ const parseHarmony = (clause: Clause): AnyIntent | null => {
   return null;
 };
 
-const parseRhythm = (clause: Clause): AnyIntent | null => {
+const parseRhythm = (clause: Clause): Intent | null => {
   const target = parseTarget(clause);
   const groove = clause.normalized.match(/groove\s+(straight|swing|shuffle|triplet|dotted)/);
   if (groove) {
@@ -484,7 +482,7 @@ const parseRhythm = (clause: Clause): AnyIntent | null => {
   return null;
 };
 
-const parsePerformance = (clause: Clause): AnyIntent | null => {
+const parsePerformance = (clause: Clause): Intent | null => {
   const target = parseTarget(clause);
   const scene = clause.raw.match(/trigger\s+scene\s+"?([\w\s_-]+)"?/i);
   if (scene) {
@@ -500,7 +498,7 @@ const parsePerformance = (clause: Clause): AnyIntent | null => {
   return null;
 };
 
-const parseTimbre = (clause: Clause): AnyIntent | null => {
+const parseTimbre = (clause: Clause): Intent | null => {
   const target = parseTarget(clause);
   const adjectiveMatches = Object.keys(timbreAdjectives).filter((key) =>
     clause.normalized.includes(key)
@@ -540,7 +538,7 @@ const parseTimbre = (clause: Clause): AnyIntent | null => {
   };
 };
 
-const parseClause = (clause: Clause): AnyIntent | null =>
+const parseClause = (clause: Clause): Intent | null =>
   parseTransport(clause) ||
   parseStructure(clause) ||
   parseMusic(clause) ||
@@ -550,7 +548,7 @@ const parseClause = (clause: Clause): AnyIntent | null =>
   parseTimbre(clause);
 
 export const parseTextToIntents = (text: string): ParseResult => {
-  const intents: AnyIntent[] = [];
+  const intents: Intent[] = [];
   const errors: string[] = [];
 
   for (const clause of splitClauses(text)) {
@@ -562,10 +560,6 @@ export const parseTextToIntents = (text: string): ParseResult => {
 
     const validation = IntentSchema.safeParse(parsed);
     if (!validation.success) {
-      if (isCustomStructureIntent(parsed)) {
-        intents.push(parsed);
-        continue;
-      }
       errors.push(`Invalid intent from clause: "${clause.raw.trim()}"`);
       continue;
     }
@@ -586,5 +580,12 @@ export const supportedDomains: Domain[] = [
   "harmony",
   "rhythm",
   "performance",
+  "analysis",
+  "pitch",
+  "duration",
+  "dynamics",
+  "articulation",
+  "instrumentation",
+  "time_point",
   "timbre"
 ];
