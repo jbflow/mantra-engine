@@ -1,3 +1,3 @@
 export const config = {
-  wsUrl: "ws://localhost:1978"
+  wsUrl: "ws://localhost:1979"
 };

@@ -1,9 +1,10 @@
 import WebSocket from "ws";
 import { parseTextToIntents } from "../nlp/intentParser.js";
+import { config } from "../config.js";
 
 const args = process.argv.slice(2);
 const urlArgIndex = args.findIndex((arg) => arg.startsWith("ws://") || arg.startsWith("wss://"));
-const url = urlArgIndex >= 0 ? args.splice(urlArgIndex, 1)[0] : "ws://localhost:39031";
+const url = urlArgIndex >= 0 ? args.splice(urlArgIndex, 1)[0] : config.wsUrl;
 const text = args.join(" ") || "play";
 const parsed = parseTextToIntents(text);
 
