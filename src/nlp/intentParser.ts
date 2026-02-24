@@ -294,11 +294,16 @@ const parseStructure = (clause: Clause): Intent | null => {
   );
   const createTrackMatch = createTrackTrailingRole ?? createTrackLeadingRole;
   if (createTrackMatch) {
-    const inferredRole = roleValues.find((value) => clause.normalized.includes(value)) ?? "drums";
+    const inferredRole = roleValues.find((value) => clause.normalized.includes(value));
     const rawRole = (createTrackMatch[2] ?? "").trim().toLowerCase();
-    const role = (roleValues.includes(rawRole as Role) ? rawRole : inferredRole) as Role;
+    const role = roleValues.includes(rawRole as Role)
+      ? (rawRole as Role)
+      : inferredRole;
     const type = createTrackMatch[1] as "audio" | "midi" | undefined;
-    return { domain: "structure", intent: { action: "create_track", role, type } };
+    const intent = role
+      ? { action: "create_track", role, type }
+      : { action: "create_track", type };
+    return { domain: "structure", intent };
   }
 
   const resolvedTarget = target ?? {};

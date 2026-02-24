@@ -92,7 +92,7 @@ declare module "mantra-intent-protocol" {
     | { action: "set_loop"; startBars: number; lengthBars: number };
 
   export type StructureIntent =
-    | { action: "create_track"; role: Role; type?: "audio" | "midi" }
+    | { action: "create_track"; role?: Role; type?: "audio" | "midi" }
     | { action: "rename_track"; target: TargetRef; name: string }
     | { action: "duplicate_track"; target: TargetRef; name?: string }
     | { action: "remove_track"; target: TargetRef }

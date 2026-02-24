@@ -8,7 +8,7 @@
     "build": "tsc -p tsconfig.json",
     "server": "tsx src/tools/runServer.ts",
     "send": "tsx src/tools/sendIntent.ts",
-    "test": "vitest",
+    "nlp": "tsx src/tools/cli.ts",
     "postinstall": "npm --prefix node_modules/mantra-intent-protocol run build"
   },
   "dependencies": {
