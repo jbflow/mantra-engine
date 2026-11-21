@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "tsx watch src/tools/sendIntent.ts",
     "build": "tsc -p tsconfig.json",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "test:coverage": "node --import tsx --experimental-test-coverage --test tests/*.test.ts",
     "server": "tsx src/tools/runServer.ts",
     "send": "tsx src/tools/sendIntent.ts",
     "nlp": "tsx src/tools/cli.ts"

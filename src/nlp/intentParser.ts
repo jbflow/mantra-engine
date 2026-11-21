@@ -2,8 +2,10 @@ import {
   IntentSchema,
   type Domain,
   type Intent,
+  type ParameterValue,
   type PitchClass,
   type Role,
+  type SeriesTransformOperation,
   type TargetRef
 } from "musical-intent-protocol";
 
@@ -151,7 +153,7 @@ const numberWords: Record<string, number> = {
 
 const splitClauses = (text: string): Clause[] =>
   text
-    .split(/(?:\.|\n|;|\band\b|\bthen\b)/gi)
+    .split(/(?<!\d)\.(?!\d)|\n|;|\band\b|\bthen\b/gi)
     .map((raw) => ({ raw, normalized: raw.trim().toLowerCase() }))
     .filter((clause) => clause.normalized.length > 0);
 
@@ -301,18 +303,21 @@ const parseStructure = (clause: Clause): Intent | null => {
       : inferredRole;
     const type = createTrackMatch[1] as "audio" | "midi" | undefined;
     if (!role) return null;
-    return { domain: "structure", intent: { action: "create_track", role, type } };
+    return {
+      domain: "structure",
+      intent: { action: "create_track", role, ...(type ? { type } : {}) }
+    };
   }
 
   const resolvedTarget = target ?? {};
   if (/select\s+track|select\s+\w+/.test(clause.normalized)) {
     return { domain: "structure", intent: { action: "select_track", target: resolvedTarget } };
   }
-  if (/arm\s+track|arm\s+\w+/.test(clause.normalized)) {
-    return { domain: "structure", intent: { action: "arm_track", target: resolvedTarget } };
-  }
-  if (/disarm\s+track|disarm\s+\w+/.test(clause.normalized)) {
+  if (/\bdisarm\s+track|\bdisarm\s+\w+/.test(clause.normalized)) {
     return { domain: "structure", intent: { action: "disarm_track", target: resolvedTarget } };
+  }
+  if (/\barm\s+track|\barm\s+\w+/.test(clause.normalized)) {
+    return { domain: "structure", intent: { action: "arm_track", target: resolvedTarget } };
   }
   if (/\bmute\b/.test(clause.normalized)) {
     return { domain: "structure", intent: { action: "mute", target: resolvedTarget } };
@@ -346,11 +351,20 @@ const parseStructure = (clause: Clause): Intent | null => {
     return { domain: "structure", intent: { action: "remove_track", target: deleteTarget } };
   }
 
-  const duplicateMatch = clause.raw.match(/duplicate\s+track\s+"?([\w\s_-]+)"?$/i);
+  const duplicateMatch = clause.raw.match(
+    /duplicate\s+track\s+"?([\w\s_-]+?)"?(?:\s+as\s+"?([\w\s_-]+)"?)?$/i
+  );
   if (duplicateMatch) {
     const trackRef = parseTrackIndex(duplicateMatch[1]) ?? duplicateMatch[1].trim();
     const duplicateTarget = trackRef ? { track_name: String(trackRef) } : resolvedTarget;
-    return { domain: "structure", intent: { action: "duplicate_track", target: duplicateTarget } };
+    return {
+      domain: "structure",
+      intent: {
+        action: "duplicate_track",
+        target: duplicateTarget,
+        ...(duplicateMatch[2] ? { name: duplicateMatch[2].trim() } : {})
+      }
+    };
   }
 
   const loadDevice = clause.raw.match(
@@ -378,6 +392,87 @@ const parseStructure = (clause: Clause): Intent | null => {
 
 const parseMusic = (clause: Clause): Intent | null => {
   const target = parseTarget(clause);
+  const addNote = clause.normalized.match(
+    /\badd\s+notes?\s+([a-g](?:#|b)?\d)\s+at\s+(?:beat\s+)?(-?\d+(?:\.\d+)?)\s+for\s+(\d+(?:\.\d+)?)\s+beats?\b/
+  );
+  if (addNote && target) {
+    return {
+      domain: "music",
+      intent: {
+        action: "add_notes",
+        target,
+        notes: [
+          {
+            pitch: addNote[1].toUpperCase(),
+            start_beats: Number(addNote[2]),
+            duration_beats: Number(addNote[3])
+          }
+        ]
+      }
+    };
+  }
+
+  const removeNote = clause.normalized.match(
+    /\bremove\s+notes?\s+([a-g](?:#|b)?\d)\s+(?:from|in|on)\s+/
+  );
+  if (removeNote && target) {
+    return {
+      domain: "music",
+      intent: { action: "remove_notes", target, selection: { pitches: [removeNote[1].toUpperCase()] } }
+    };
+  }
+
+  const editNote = clause.normalized.match(
+    /\bedit\s+notes?\s+([a-g](?:#|b)?\d)\s+(?:in|on)\s+/
+  );
+  if (editNote && target) {
+    const operationText = clause.normalized.slice(editNote[0].length);
+    const operations = [
+      {
+        pattern: /\bset\s+velocity(?:\s+to)?\s+(0(?:\.\d+)?|1(?:\.0+)?)/,
+        create: (value: string) => ({ type: "set_velocity" as const, velocity: Number(value) })
+      },
+      {
+        pattern: /\bset\s+duration(?:\s+to)?\s+(\d+(?:\.\d+)?)/,
+        create: (value: string) => ({ type: "set_duration" as const, duration_beats: Number(value) })
+      },
+      {
+        pattern: /\bset\s+start(?:\s+to)?\s+(-?\d+(?:\.\d+)?)/,
+        create: (value: string) => ({ type: "set_start" as const, start_beats: Number(value) })
+      },
+      {
+        pattern: /\bset\s+pitch(?:\s+to)?\s+([a-g](?:#|b)?\d)/,
+        create: (value: string) => ({ type: "set_pitch" as const, pitch: value.toUpperCase() })
+      },
+      {
+        pattern: /\btranspose(?:\s+by)?\s+(-?\d+)\s*(?:semitones?)?/,
+        create: (value: string) => ({ type: "transpose" as const, semitones: Number(value) })
+      },
+      {
+        pattern: /\bquantize(?:\s+strength)?\s+(0(?:\.\d+)?|1(?:\.0+)?)/,
+        create: (value: string) => ({ type: "quantize" as const, strength: Number(value) })
+      },
+      {
+        pattern: /\bhumanize(?:\s+amount)?\s+(0(?:\.\d+)?|1(?:\.0+)?)/,
+        create: (value: string) => ({ type: "humanize" as const, amount: Number(value) })
+      }
+    ];
+    for (const { pattern, create } of operations) {
+      const match = operationText.match(pattern);
+      if (match) {
+        return {
+          domain: "music",
+          intent: {
+            action: "edit_notes",
+            target,
+            selection: { pitches: [editNote[1].toUpperCase()] },
+            operation: create(match[1])
+          }
+        } as Intent;
+      }
+    }
+  }
+
   const quantize = clause.normalized.match(/quantize(?:\s+.*)?(?:\s+(?:strength|amount)?\s*(0(?:\.\d+)?|1(?:\.0+)?))?/);
   if (quantize && target) {
     const strength = parseNumber(quantize[1]) ?? 0.8;
@@ -452,6 +547,70 @@ const parseHarmony = (clause: Clause): Intent | null => {
   return null;
 };
 
+const parseParameterValue = (raw: string): ParameterValue => {
+  const value = raw.trim().replace(/^"|"$/g, "");
+  const numeric = Number(value);
+  return value !== "" && Number.isFinite(numeric) ? numeric : value;
+};
+
+type ParameterSeriesDomain =
+  | "pitch"
+  | "duration"
+  | "dynamics"
+  | "articulation"
+  | "instrumentation"
+  | "time_point";
+
+const parseParameterSeries = (clause: Clause, domain: ParameterSeriesDomain): Intent | null => {
+  const normalized = clause.normalized;
+  const target = parseTarget(clause);
+  const domainText = domain.replace("_", " ");
+
+  const setValue = normalized.match(new RegExp(`^set ${domainText} value(?:\\s+to)?\\s+(.+)$`));
+  if (setValue) {
+    return {
+      domain,
+      intent: { action: "set_value", value: parseParameterValue(setValue[1]), target }
+    } as Intent;
+  }
+
+  const setSeries = normalized.match(new RegExp(`^set ${domainText} series(?:\\s+to)?\\s+(.+)$`));
+  if (setSeries) {
+    const values = setSeries[1].match(/"[^"]+"|[^,\s]+/g) ?? [];
+    return {
+      domain,
+      intent: { action: "set_series", series: values.map(parseParameterValue), target }
+    } as Intent;
+  }
+
+  const transform = normalized.match(
+    new RegExp(
+      `^transform ${domainText} series (invert|retrograde|rotate|shuffle|stretch|compress)(?:\\s+by\\s+(-?\\d+(?:\\.\\d+)?))?$`
+    )
+  );
+  if (transform) {
+    return {
+      domain,
+      intent: {
+        action: "transform_series",
+        operation: transform[1] as SeriesTransformOperation,
+        amount: transform[2] ? Number(transform[2]) : undefined,
+        target
+      }
+    } as Intent;
+  }
+
+  const map = normalized.match(new RegExp(`^map ${domainText} from (.+?) to (.+)$`));
+  if (map) {
+    return {
+      domain,
+      intent: { action: "map", source: map[1].trim(), destination: map[2].trim(), target }
+    } as Intent;
+  }
+
+  return null;
+};
+
 const parseRhythm = (clause: Clause): Intent | null => {
   const target = parseTarget(clause);
   const groove = clause.normalized.match(/groove\s+(straight|swing|shuffle|triplet|dotted)/);
@@ -501,6 +660,45 @@ const parsePerformance = (clause: Clause): Intent | null => {
   return null;
 };
 
+const parseAnalysis = (clause: Clause): Intent | null => {
+  const target = parseTarget(clause);
+  const summarize = clause.normalized.match(/^summarize\b/);
+  if (summarize) {
+    const detail = /\bdetail(?:ed)?\b/.test(clause.normalized)
+      ? "detailed"
+      : /\bbrief(?:ly)?\b/.test(clause.normalized)
+        ? "brief"
+        : undefined;
+    return { domain: "analysis", intent: { action: "summarize", target, detail } };
+  }
+
+  const describe = clause.normalized.match(/^describe\b/);
+  if (describe) {
+    const focus = clause.normalized.match(/\b(?:focus(?:ing)?(?:\s+on)?|about)\s+([\w\s_-]+)$/)?.[1].trim();
+    return { domain: "analysis", intent: { action: "describe", target, focus } };
+  }
+
+  const query = clause.raw.match(/^\s*query\s+(.+?)(?:\s+as\s+(text|json))?\s*$/i);
+  if (query) {
+    return {
+      domain: "analysis",
+      intent: {
+        action: "query",
+        question: query[1].trim(),
+        target,
+        format: query[2]?.toLowerCase() as "text" | "json" | undefined
+      }
+    };
+  }
+
+  const list = clause.normalized.match(/^list\s+(tracks|clips|scenes|devices|notes|automation)\b/);
+  if (list) {
+    return { domain: "analysis", intent: { action: "list", kind: list[1] as "tracks" | "clips" | "scenes" | "devices" | "notes" | "automation", target } };
+  }
+
+  return null;
+};
+
 const parseTimbre = (clause: Clause): Intent | null => {
   const target = parseTarget(clause);
   const adjectiveMatches = Object.keys(timbreAdjectives).filter((key) =>
@@ -543,12 +741,33 @@ const parseTimbre = (clause: Clause): Intent | null => {
 
 const parseClause = (clause: Clause): Intent | null =>
   parseTransport(clause) ||
-  parseStructure(clause) ||
   parseMusic(clause) ||
+  parseStructure(clause) ||
   parseHarmony(clause) ||
+  parseParameterSeries(clause, "pitch") ||
+  parseParameterSeries(clause, "duration") ||
+  parseParameterSeries(clause, "dynamics") ||
+  parseParameterSeries(clause, "articulation") ||
+  parseParameterSeries(clause, "instrumentation") ||
+  parseParameterSeries(clause, "time_point") ||
   parseRhythm(clause) ||
   parsePerformance(clause) ||
+  parseAnalysis(clause) ||
   parseTimbre(clause);
+
+const omitUndefined = <T>(value: T): T => {
+  if (Array.isArray(value)) {
+    return value.map(omitUndefined) as T;
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([, entry]) => entry !== undefined)
+        .map(([key, entry]) => [key, omitUndefined(entry)])
+    ) as T;
+  }
+  return value;
+};
 
 export const parseTextToIntents = (text: string): ParseResult => {
   const intents: Intent[] = [];
@@ -567,7 +786,7 @@ export const parseTextToIntents = (text: string): ParseResult => {
       continue;
     }
 
-    intents.push(validation.data);
+    intents.push(omitUndefined(validation.data));
   }
 
   return {

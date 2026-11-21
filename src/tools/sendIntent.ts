@@ -29,6 +29,7 @@ ws.on("open", () => {
 ws.on("message", (data) => {
   // eslint-disable-next-line no-console
   console.log("message", data.toString());
+  ws.close();
 });
 
 ws.on("error", (err) => {
