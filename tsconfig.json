@@ -3,10 +3,6 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "baseUrl": ".",
-    "paths": {
-      "mantra-intent-protocol": ["vendor/musical-intent-protocol/src/index.ts"]
-    },
     "rootDir": "src",
     "outDir": "dist",
     "strict": true,

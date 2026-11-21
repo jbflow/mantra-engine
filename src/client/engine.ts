@@ -1,4 +1,4 @@
-import type { Intent, Source } from "mantra-intent-protocol";
+import type { Intent, Source } from "musical-intent-protocol";
 import { parseTextToIntents, type ParseResult } from "../nlp/intentParser.js";
 import type {
   ClientAckMessage,

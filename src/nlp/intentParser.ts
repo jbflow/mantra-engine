@@ -5,7 +5,7 @@ import {
   type PitchClass,
   type Role,
   type TargetRef
-} from "mantra-intent-protocol";
+} from "musical-intent-protocol";
 
 export type ParseResult = {
   intents: Intent[];
@@ -300,10 +300,8 @@ const parseStructure = (clause: Clause): Intent | null => {
       ? (rawRole as Role)
       : inferredRole;
     const type = createTrackMatch[1] as "audio" | "midi" | undefined;
-    const intent = role
-      ? { action: "create_track", role, type }
-      : { action: "create_track", type };
-    return { domain: "structure", intent };
+    if (!role) return null;
+    return { domain: "structure", intent: { action: "create_track", role, type } };
   }
 
   const resolvedTarget = target ?? {};

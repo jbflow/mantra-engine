@@ -8,11 +8,10 @@
     "build": "tsc -p tsconfig.json",
     "server": "tsx src/tools/runServer.ts",
     "send": "tsx src/tools/sendIntent.ts",
-    "nlp": "tsx src/tools/cli.ts",
-    "postinstall": "npm --prefix node_modules/mantra-intent-protocol run build"
+    "nlp": "tsx src/tools/cli.ts"
   },
   "dependencies": {
-    "mantra-intent-protocol": "file:vendor/musical-intent-protocol",
+    "musical-intent-protocol": "git+https://github.com/jbflow/musical-intent-protocol.git#main",
     "zod": "^3.24.0"
   },
   "devDependencies": {

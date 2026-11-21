@@ -5,7 +5,7 @@ import {
   type Envelope,
   type Intent,
   type Source
-} from "mantra-intent-protocol";
+} from "musical-intent-protocol";
 
 export type ValidationResult = {
   envelopes: Envelope[];

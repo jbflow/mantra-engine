@@ -1,4 +1,4 @@
-import type { Domain, Role, TargetRef } from "mantra-intent-protocol";
+import type { Domain, Role, TargetRef } from "musical-intent-protocol";
 
 export type SessionState = {
   lastTempo?: number;

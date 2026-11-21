@@ -1,6 +1,6 @@
 # Mantra Engine
 
-Mantra Engine is a browser-first intent detection engine that converts natural language into Mantra Intent Protocol (MIP) JSON and sends it to a WebSocket server running locally.
+Mantra Engine is a browser-first intent detection engine that converts natural language into Musical Intent Protocol (MIP) JSON and sends it to a WebSocket server running locally.
 
 ## Requirements
 
@@ -41,5 +41,5 @@ Send text from Node to a running WebSocket server:
 
 ## Notes
 
-- NLP parsing is rule-based and covers every domain/action in MIP v0.1. If a phrase is ambiguous, the parser returns a validation error.
-- Ensure the mantra-intent-protocol package is installed and provides `Intent`, `Envelope`, `makeEnvelope`, and zod schemas (`IntentSchema`, `EnvelopeSchema`).
+- NLP parsing is rule-based and covers every domain/action in MIP v0.2. If a phrase is ambiguous, the parser returns a validation error.
+- The engine installs `musical-intent-protocol` from the `main` branch of `jbflow/musical-intent-protocol` on GitHub.
