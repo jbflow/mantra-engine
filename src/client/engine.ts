@@ -4,7 +4,8 @@ import type {
   ClientAckMessage,
   ClientErrorMessage,
   ClientResultMessage,
-  ClientIntentMessage
+  ClientIntentMessage,
+  MidiActionPayload
 } from "../server/messageTypes.js";
 
 export type EngineHandlers = {
@@ -95,6 +96,14 @@ export class MantraEngine {
     };
 
     this.socket.send(JSON.stringify(message));
+  }
+
+  sendMidiAction(payload: MidiActionPayload) {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+      throw new Error("WebSocket is not connected");
+    }
+
+    this.socket.send(JSON.stringify({ type: "midi", payload }));
   }
 
   sendText(text: string): ParseResult {

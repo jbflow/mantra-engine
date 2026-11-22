@@ -95,6 +95,25 @@ test("engine sends intents through the server to a registered interpreter", asyn
       })
     );
 
+    const midiDispatch = nextJsonMessage(interpreter);
+    engine.sendMidiAction({
+      port: "Ableton",
+      message: "note_on",
+      channel: 1,
+      data: 60,
+      value: 100
+    });
+    const dispatchedMidi = await midiDispatch;
+    assert.equal(dispatchedMidi.type, "midi");
+    assert.match(String(dispatchedMidi.id), /^[0-9a-f-]{36}$/i);
+    assert.deepEqual(dispatchedMidi.payload, {
+      port: "Ableton",
+      message: "note_on",
+      channel: 1,
+      data: 60,
+      value: 100
+    });
+
     engine.sendIntents([{ domain: "transport", intent: { action: "launch" } } as never]);
     const validationError = await error;
     assert.equal(validationError.code, "VALIDATION_ERROR");
@@ -147,6 +166,13 @@ test("server handles pings and rejects malformed, unsupported, or unrouteable me
     const invalidIntent = nextJsonMessage(client);
     client.send(JSON.stringify({ type: "intent", payload: { domain: "transport", intent: { action: "launch" } } }));
     assert.equal((await invalidIntent).code, "VALIDATION_ERROR");
+
+    const invalidMidi = nextJsonMessage(client);
+    client.send(JSON.stringify({
+      type: "midi",
+      payload: { port: "Ableton", message: "note_on", channel: 17, data: 60, value: 100 }
+    }));
+    assert.equal((await invalidMidi).code, "VALIDATION_ERROR");
   } finally {
     const clientClosed = client ? once(client, "close") : Promise.resolve();
     const interpreterClosed = interpreter ? once(interpreter, "close") : Promise.resolve();

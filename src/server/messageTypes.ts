@@ -8,7 +8,20 @@ export type ClientIntentMessage = {
 
 export type ClientPingMessage = { type: "ping" };
 
-export type ClientMessage = ClientIntentMessage | ClientPingMessage;
+export type MidiActionPayload = {
+  port: string;
+  message: "note_on" | "note_off" | "control_change" | "program_change";
+  channel: number;
+  data: number;
+  value: number;
+};
+
+export type ClientMidiActionMessage = {
+  type: "midi";
+  payload: MidiActionPayload;
+};
+
+export type ClientMessage = ClientIntentMessage | ClientMidiActionMessage | ClientPingMessage;
 
 export type ClientAckMessage = {
   type: "ack";

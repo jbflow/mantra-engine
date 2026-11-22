@@ -22,6 +22,7 @@ test("handles raw and typed messages, reuses open connections, and sends intents
   let receivedMessage: Record<string, unknown> | undefined;
   let engine: MantraEngine | undefined;
   let resolveReceived!: (message: Record<string, unknown>) => void;
+  let resolveMidiReceived!: (message: Record<string, unknown>) => void;
   let resolveOpen!: () => void;
   let resolveClose!: () => void;
   let resolveRaw!: () => void;
@@ -30,6 +31,9 @@ test("handles raw and typed messages, reuses open connections, and sends intents
   let resolveResult!: () => void;
   const received = new Promise<Record<string, unknown>>((resolve) => {
     resolveReceived = resolve;
+  });
+  const midiReceived = new Promise<Record<string, unknown>>((resolve) => {
+    resolveMidiReceived = resolve;
   });
   const opened = new Promise<void>((resolve) => {
     resolveOpen = resolve;
@@ -54,7 +58,8 @@ test("handles raw and typed messages, reuses open connections, and sends intents
     connectionCount += 1;
     socket.on("message", (data) => {
       receivedMessage = JSON.parse(data.toString());
-      resolveReceived(receivedMessage);
+      if (receivedMessage.type === "intent") resolveReceived(receivedMessage);
+      if (receivedMessage.type === "midi") resolveMidiReceived(receivedMessage);
     });
     socket.send("not-json");
     socket.send(JSON.stringify({ type: "ack", ids: ["id"] }));
@@ -96,6 +101,16 @@ test("handles raw and typed messages, reuses open connections, and sends intents
       payload: { domain: "transport", intent: { action: "play" } },
       source: "test"
     });
+
+    const midiAction = {
+      port: "Ableton",
+      message: "note_on" as const,
+      channel: 1,
+      data: 60,
+      value: 100
+    };
+    engine.sendMidiAction(midiAction);
+    assert.deepEqual(await midiReceived, { type: "midi", payload: midiAction });
 
     engine.disconnect();
     await closed;
