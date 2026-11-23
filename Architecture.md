@@ -1,61 +1,168 @@
-You are helping me build **Mantra Engine**, a browser-first intent detection engine that converts **Musical Intent Protocol (MIP)** natural language into JSON intents and sends them to a local WebSocket server. This repo is ONLY the engine/runtime, not a DAW integration and not speech recognition.
+# Mantra Engine Architecture
 
-MUST-HAVES
-- Use TypeScript.
-- Run in the browser (no Node-only APIs required for core engine).
-- Import MIP types + validators from `musical-intent-protocol`:
-  - `Intent`, `Envelope`, `makeEnvelope`
-  - zod validators (e.g. `IntentSchema` / `EnvelopeSchema` / per-domain schemas)
-- Validate parsed intents at runtime using zod BEFORE sending.
-- Engine must be host-agnostic (not Ableton-specific).
+## Overview
 
-CORE RESPONSIBILITIES (Sprint 1-2)
-1) Parse natural language into MIP intents:
-  - Support all MIP v0.2 domains and actions.
-   - Produce `Intent[]` from text (multi-clause supported).
-   - Return structured errors for unrecognized or invalid phrases.
+**Mantra Engine** is a pure intent parsing library that converts natural language into **Musical Intent Protocol (MIP)** JSON intents. It has no server infrastructure, no DAW integration, and no speech recognition.
 
-2) WebSocket client:
-   - Connect to ws://localhost:1978 (configurable).
-   - Send message format:
-     { "type": "intent", "payload": <Intent | Intent[]>, "source": <Source> }
-   - Receive acks/results/errors and forward to handlers.
+```
+Mantra Frontend (NextJS)
+       ↓
+Mantra Engine (TypeScript)
+  - parseTextToIntents() → Intent[]
+  - validateAndNormalize() → Envelope[]
+  - MantraEngine client (optional WebSocket wrapper)
+       ↓
+Mantra Remote Script (Python)
+  - Executes intents in Ableton Live
+```
 
-3) Optional normalization:
-   - Provide utility to normalize to `Envelope[]` using `makeEnvelope` for consumers that need envelopes.
+## Design Principles
 
-OUT OF SCOPE (do not implement yet)
-- Wake word detection, speech recognition, Whisper
-- LLM parsing
-- Memory/learning updates beyond simple state scaffolding
-- Custom command builder UI
-- Any DAW-specific mapping inside the engine
+- **Host-agnostic**: No DAW-specific logic (Ableton integration is in separate repo)
+- **Browser-first**: Core engine runs in browsers and Node.js
+- **Schema-driven**: All parsing validated against MIP v0.2 schema
+- **Minimal dependencies**: Only `musical-intent-protocol` and `zod`
 
-PROJECT STRUCTURE
-- src/
-  - client/
-    - engine.ts              // browser WS client + sendText API
-  - nlp/
-    - intentParser.ts        // rule-based NLP -> Intent[]
-  - core/
-    - validator.ts           // zod validation + normalization -> Envelope[]
-  - server/
-    - messageTypes.ts        // TS types for WS messages
-  - index.ts                 // public exports
-- src/config.ts              // default WS URL
+## Project Structure
 
-IMPORTANT MESSAGE CONTRACTS
-Client -> Server:
-- {type:"intent", payload: Intent | Intent[] , source?: Source}
-- {type:"ping"}
+```
+src/
+├── client/
+│   └── engine.ts              # WebSocket client wrapper (optional)
+├── nlp/
+│   ├── intentParser.ts        # Main NLP parser
+│   └── domains/               # Domain-specific parsers
+├── core/
+│   ├── validator.ts           # Zod validation & normalization
+│   ├── router.ts              # Intent routing
+│   ├── state.ts               # Session state scaffolding
+│   └── logger.ts              # Structured logging
+├── types/
+│   └── protocol.ts            # WebSocket message types
+└── index.ts                   # Public exports
+```
 
-Server -> Client:
-- {type:"ack", ids: string[]}
-- {type:"error", code, message, issues?}
-- {type:"result", id, status, details?}
+## Public API
 
-IMPLEMENTATION TASKS
-1) Build a browser-first engine wrapper with WebSocket connection management.
-2) Implement NLP parsing across all MIP v0.2 domains/actions.
-3) Validate parsed intents with zod before sending.
-4) Provide a simple CLI tool (Node) for dev testing.
+### Core Functions
+
+```typescript
+// Parse natural language → Intent[]
+parseTextToIntents(text: string): ParseResult
+  ├─ intents: Intent[]
+  ├─ errors: ParseError[]
+  └─ analysis: AnalysisResult
+
+// Validate and normalize → Envelope[]
+validateAndNormalize(intents: Intent | Intent[]): Result
+  ├─ valid: Envelope[]
+  └─ invalid: ValidationIssue[]
+
+// Get list of supported domains
+supportedDomains(): string[]
+
+// Validate a single intent
+validateAndNormalize(intent: Intent): Envelope | ValidationError
+```
+
+### Optional WebSocket Client
+
+```typescript
+// Connect to remote script server
+const engine = new MantraEngine({
+  url: "ws://localhost:1978",
+  source: "frontend",
+  handlers: {
+    onOpen: () => {},
+    onAck: (message) => {},
+    onError: (message) => {},
+    onResult: (message) => {}
+  }
+});
+
+await engine.connect();
+engine.sendText("play");  // Parse + send in one call
+engine.sendIntents(intents);
+engine.disconnect();
+```
+
+## Supported Domains
+
+All MIP v0.2 domains:
+- `transport` - Play, stop, record, tempo, navigation
+- `structure` - Tracks, clips, devices
+- `music` - Notes, quantization, transposition
+- `performance` - Scene/clip triggering
+- `analysis` - Queries and introspection
+- Plus 10+ more specialized domains
+
+## Example Usage
+
+```typescript
+import { MantraEngine, parseTextToIntents } from "mantra-engine";
+
+// 1. Parse text
+const result = parseTextToIntents("play at 120 bpm");
+console.log(result.intents);
+// [
+//   { domain: "transport", intent: { action: "play" } },
+//   { domain: "transport", intent: { action: "set_tempo", tempo: 120 } }
+// ]
+
+// 2. Validate intents
+const { valid } = validateAndNormalize(result.intents);
+
+// 3. Send via WebSocket (optional)
+const engine = new MantraEngine({ url: "ws://localhost:1978" });
+await engine.connect();
+engine.sendIntents(valid);
+```
+
+## Message Protocol
+
+The optional WebSocket client uses this protocol to communicate with the Remote Script:
+
+**Client → Server**:
+```json
+{
+  "type": "intent",
+  "payload": {"domain": "transport", "intent": {"action": "play"}},
+  "source": "frontend"
+}
+```
+
+**Server → Client**:
+```json
+{
+  "type": "result",
+  "id": "...",
+  "status": "ok"
+}
+```
+
+## Testing
+
+```bash
+npm test                # Run all tests
+npm run test:coverage   # With coverage
+```
+
+Tests focus on:
+- Intent parsing correctness
+- Domain coverage
+- Error handling
+- Validation logic
+
+## Out of Scope
+
+- DAW integration (see `mantra-remote-script`)
+- Speech recognition
+- Wake word detection
+- Persistent state/learning
+- UI/command builder
+
+## See Also
+
+- [mantra-remote-script](../mantra-remote-script/) - Ableton Live integration
+- [mantra-fe](../mantra-fe/) - Frontend application
+- [musical-intent-protocol](https://github.com/jbflow/musical-intent-protocol) - MIP schema

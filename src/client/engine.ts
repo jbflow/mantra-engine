@@ -6,7 +6,7 @@ import type {
   ClientResultMessage,
   ClientIntentMessage,
   MidiActionPayload
-} from "../server/messageTypes.js";
+} from "../types/protocol.js";
 
 export type EngineHandlers = {
   onOpen?: () => void;
