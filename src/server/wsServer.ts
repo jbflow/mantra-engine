@@ -8,6 +8,7 @@ import type {
 	ClientResultMessage
 } from "./messageTypes.js";
 import type { MidiActionPayload } from "./messageTypes.js";
+import type { AbletonJsBridge } from "./abletonjs-bridge.js";
 
 type InterpreterConnection = {
 	socket: WebSocket;
@@ -43,10 +44,15 @@ const isMidiActionPayload = (payload: unknown): payload is MidiActionPayload => 
 const numberInRange = (value: unknown, min: number, max: number): value is number =>
 	typeof value === "number" && Number.isInteger(value) && value >= min && value <= max;
 
-export const startWsServer = (port: number) => {
+export interface WsServerOptions {
+	abletonJsBridge?: AbletonJsBridge;
+}
+
+export const startWsServer = (port: number, options?: WsServerOptions) => {
 	const wss = new WebSocketServer({ port });
 	let interpreter: InterpreterConnection | null = null;
 	const clients = new Set<WebSocket>();
+	const abletonJsBridge = options?.abletonJsBridge;
 
 	const broadcastToClients = (payload: ClientAckMessage | ClientErrorMessage | ClientResultMessage) => {
 		for (const client of clients) {
@@ -85,7 +91,7 @@ export const startWsServer = (port: number) => {
 		}
 
 		clients.add(socket);
-		socket.on("message", (data) => {
+		socket.on("message", async (data) => {
 			const message = parseJson(data) as ClientMessage | undefined;
 			if (!message) {
 				sendJson(socket, {
@@ -153,6 +159,15 @@ export const startWsServer = (port: number) => {
 					issues
 				} satisfies ClientErrorMessage);
 				return;
+			}
+
+			// Forward to ableton-js bridge if available
+			if (abletonJsBridge) {
+				try {
+					await abletonJsBridge.processIntent(payload);
+				} catch (err) {
+					console.error("Error forwarding to ableton-js:", err);
+				}
 			}
 
 			const ids: string[] = [];
