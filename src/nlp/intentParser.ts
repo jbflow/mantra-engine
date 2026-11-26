@@ -152,11 +152,43 @@ const numberWords: Record<string, number> = {
   sixteen: 16
 };
 
-const splitClauses = (text: string): Clause[] =>
-  text
-    .split(/(?<!\d)\.(?!\d)|\n|;|\band\b|\bthen\b/gi)
-    .map((raw) => ({ raw, normalized: raw.trim().toLowerCase() }))
-    .filter((clause) => clause.normalized.length > 0);
+const commandStart = /^(?:play|stop|record|toggle|set|locate|loop|metronome|create|add|new|select|arm|disarm|mute|unmute|un-mute|solo|unsolo|un-solo|rename|name|delete|remove|duplicate|load|insert|move|route|copy|quantize|transpose|edit|transform|map|trigger|summarize|describe|query|list|make|increase|decrease|raise|lower|reduce|turn|humanize)\b/i;
+
+const splitClauses = (text: string): Clause[] => {
+  const clauses: Clause[] = [];
+  let start = 0;
+  let quoted = false;
+  const push = (end: number) => {
+    const raw = text.slice(start, end).trim().replace(/,\s*$/, "");
+    if (raw && !/^(?:and|then)$/i.test(raw)) {
+      clauses.push({ raw, normalized: raw.toLowerCase() });
+    }
+  };
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '"') quoted = !quoted;
+    if (quoted) continue;
+    const punctuation = /[;!?\n]/.test(text[i]) ||
+      (text[i] === "," && commandStart.test(text.slice(i + 1).trimStart())) ||
+      (text[i] === "." && !(i > 0 && /\d/.test(text[i - 1]) && /\d/.test(text[i + 1] ?? "")));
+    if (punctuation) {
+      push(i);
+      start = i + 1;
+      continue;
+    }
+    if (i > 0 && /\w/.test(text[i - 1])) continue;
+    const separator = text.slice(i).match(/^(?:and\s+then|then|and)\b\s*/i);
+    if (!separator) continue;
+    const remainder = text.slice(i + separator[0].length);
+    if (/^then/i.test(separator[0]) || /then/i.test(separator[0]) ||
+        commandStart.test(remainder) || !remainder.trim()) {
+      push(i);
+      i += separator[0].length - 1;
+      start = i + 1;
+    }
+  }
+  push(text.length);
+  return clauses;
+};
 
 const parseTarget = (clause: Clause): TargetRef | undefined => {
   const target: TargetRef = {};
@@ -175,12 +207,14 @@ const parseTarget = (clause: Clause): TargetRef | undefined => {
     }
   }
 
-  const role = roleValues.find((value) => clause.normalized.includes(value));
+  const role = roleValues.find((value) =>
+    new RegExp(`\\b${value.replace(/_/g, "[ _]")}\\b`).test(clause.normalized)
+  );
   if (role) {
     target.role = role;
   }
 
-  const detail = roleDetailValues.find((value) => clause.normalized.includes(value));
+  const detail = roleDetailValues.find((value) => new RegExp(`\\b${value}\\b`).test(clause.normalized));
   if (detail) {
     target.role_detail = detail;
   }
@@ -199,10 +233,12 @@ const parseTrackReference = (text: string): TargetRef | undefined => {
   const trackFirst = phrase.match(/^track\s+"?([^"]+?)"?$/i);
   if (trackFirst) {
     const name = trackFirst[1].trim();
+    if (!phrase.includes('"') && /\b(?:on|in|to|from|with|between|into|across|below|above|onto|and)\b/i.test(name)) return undefined;
     if (parseTrackIndex(name)) return undefined;
     return name ? { track_name: name } : undefined;
   }
   const name = phrase.replace(/\s+track$/i, "").trim();
+  if (!phrase.includes('"') && /\b(?:on|in|to|from|with|between|into|across|below|above|onto|and)\b/i.test(name)) return undefined;
   const normalized = name.toLowerCase().replace(/\s+/g, "_");
   const role = normalized === "vocals" ? "vocal" : normalized;
   if (roleValues.includes(role as Role)) return { role: role as Role };
@@ -232,51 +268,43 @@ const parseTrackIndex = (value?: string): string | undefined => {
   return undefined;
 };
 
-const inferTargetFromIndex = (clause: Clause): TargetRef | undefined => {
-  const indexMatch = clause.normalized.match(
-    /(?:track\s*)?(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|\d+)/
-  );
-  const index = parseTrackIndex(indexMatch?.[1]);
-  return index ? { track_name: index } : undefined;
-};
-
 const parseTransport = (clause: Clause): Intent | null => {
-  if (/\bplay\b/.test(clause.normalized)) {
+  if (/^play$/.test(clause.normalized)) {
     return { domain: "transport", intent: { action: "play" } };
   }
-  if (/\bstop\b/.test(clause.normalized)) {
+  if (/^stop$/.test(clause.normalized)) {
     return { domain: "transport", intent: { action: "stop" } };
   }
-  if (/\btoggle record\b/.test(clause.normalized)) {
+  if (/^toggle record$/.test(clause.normalized)) {
     return { domain: "transport", intent: { action: "toggle_record" } };
   }
-  if (/\brecord\b/.test(clause.normalized)) {
+  if (/^record$/.test(clause.normalized)) {
     return { domain: "transport", intent: { action: "record" } };
   }
-  if (/metronome\s+on/.test(clause.normalized)) {
+  if (/^metronome\s+on$/.test(clause.normalized)) {
     return { domain: "transport", intent: { action: "metronome_on" } };
   }
-  if (/metronome\s+off/.test(clause.normalized)) {
+  if (/^metronome\s+off$/.test(clause.normalized)) {
     return { domain: "transport", intent: { action: "metronome_off" } };
   }
-  if (/\bloop\s+on\b/.test(clause.normalized)) {
+  if (/^loop\s+on$/.test(clause.normalized)) {
     return { domain: "transport", intent: { action: "loop_on" } };
   }
-  if (/\bloop\s+off\b/.test(clause.normalized)) {
+  if (/^loop\s+off$/.test(clause.normalized)) {
     return { domain: "transport", intent: { action: "loop_off" } };
   }
-  const setLoop = clause.normalized.match(/loop\s+from\s+(\d+)\s+bars?\s+(?:for|length)\s+(\d+)\s+bars?/);
+  const setLoop = clause.normalized.match(/^loop\s+from\s+(\d+)\s+bars?\s+(?:for|length)\s+(\d+)\s+bars?$/);
   if (setLoop) {
     return {
       domain: "transport",
       intent: { action: "set_loop", startBars: Number(setLoop[1]), lengthBars: Number(setLoop[2]) }
     };
   }
-  const tempoMatch = clause.normalized.match(/(?:tempo|bpm)\s*(?:to|=)?\s*(\d{2,3})/);
+  const tempoMatch = clause.normalized.match(/^(?:set\s+)?(?:tempo|bpm)\s*(?:to|=)?\s*(\d{2,3})$/);
   if (tempoMatch) {
     return { domain: "transport", intent: { action: "set_tempo", bpm: Number(tempoMatch[1]) } };
   }
-  const timeSigMatch = clause.normalized.match(/time\s*signature\s*(\d+)\s*\/\s*(\d+)/);
+  const timeSigMatch = clause.normalized.match(/^(?:set\s+)?time\s*signature\s*(?:to\s*)?(\d+)\s*\/\s*(\d+)$/);
   if (timeSigMatch) {
     return {
       domain: "transport",
@@ -287,7 +315,7 @@ const parseTransport = (clause: Clause): Intent | null => {
       }
     };
   }
-  const locateBars = clause.normalized.match(/locate\s+(\d+)\s+bars?(?:\s+(\d+)\s+beats?)?/);
+  const locateBars = clause.normalized.match(/^locate\s+(\d+)\s+bars?(?:\s+(\d+)\s+beats?)?$/);
   if (locateBars) {
     return {
       domain: "transport",
@@ -298,131 +326,85 @@ const parseTransport = (clause: Clause): Intent | null => {
       }
     };
   }
-  const locateTimecode = clause.normalized.match(/locate\s+(\d{1,2}:\d{2}:\d{2}(?:\.\d+)?)/);
+  const locateTimecode = clause.normalized.match(/^locate\s+(\d{1,2}:\d{2}:\d{2}(?:\.\d+)?)$/);
   if (locateTimecode) {
     return { domain: "transport", intent: { action: "locate", timecode: locateTimecode[1] } };
   }
   return null;
 };
 
-const parseStructure = (clause: Clause): Intent | null => {
-  const target = parseTarget(clause) ?? inferTargetFromIndex(clause);
-  const createTrackTrailingRole = clause.normalized.match(
-    /(?:create|add|new)\s+(?:(?:a|an)\s+)?(?:(audio|midi)\s+)?track(?:\s+(?:for|named)?\s*"?([\w\s_-]+)"?)?/
+const parseStructure = (clause: Clause, context?: TargetRef): Intent | null => {
+  const resolve = (text: string) => /^it$/i.test(text.trim())
+    ? context
+    : parseTrackReference(text);
+  const create = clause.raw.match(
+    /^(?:create|add|new)\s+(?:(?:a|an)\s+)?(?:(audio|midi)\s+)?(?:(.+?)\s+track|track\s+(?:for\s+)?(.+))$/i
   );
-  const createTrackLeadingRole = clause.normalized.match(
-    /(?:create|add|new)\s+(?:(?:a|an)\s+)?(?:(audio|midi)\s+)?([\w_-]+)\s+track/
-  );
-  const createTrackMatch = createTrackTrailingRole ?? createTrackLeadingRole;
-  if (createTrackMatch) {
-    const inferredRole = roleValues.find((value) => clause.normalized.includes(value));
-    const rawRole = (createTrackMatch[2] ?? "").trim().toLowerCase();
-    const role = roleValues.includes(rawRole as Role)
-      ? (rawRole as Role)
-      : inferredRole;
-    const type = createTrackMatch[1] as "audio" | "midi" | undefined;
-    if (!role) return null;
-    return {
+  if (create) {
+    const role = (create[2] ?? create[3]).trim().toLowerCase().replace(/\s+/g, "_");
+    if (roleValues.includes(role as Role)) {
+      const type = create[1]?.toLowerCase() as "audio" | "midi" | undefined;
+      return { domain: "structure", intent: { action: "create_track", role: role as Role, ...(type ? { type } : {}) } };
+    }
+  }
+
+  const unary = clause.raw.match(/^(select|arm|disarm|mute|unmute|un-mute|solo|unsolo|un-solo|remove|delete)\s+(.+)$/i);
+  if (unary) {
+    const target = resolve(unary[2]);
+    if (!target) return null;
+    const actions = {
+      select: "select_track", arm: "arm_track", disarm: "disarm_track",
+      mute: "mute", unmute: "unmute", "un-mute": "unmute",
+      solo: "solo", unsolo: "unsolo", "un-solo": "unsolo",
+      remove: "remove_track", delete: "remove_track"
+    } as const;
+    const verb = unary[1].toLowerCase() as keyof typeof actions;
+    return { domain: "structure", intent: { action: actions[verb], target } };
+  }
+
+  const rename = clause.raw.match(/^(?:rename|name)\s+(.+?)\s+to\s+"?([^"]+?)"?$/i);
+  if (rename) {
+    const target = resolve(rename[1]);
+    return target ? { domain: "structure", intent: { action: "rename_track", target, name: rename[2].trim() } } : null;
+  }
+  const duplicate = clause.raw.match(/^duplicate\s+(.+?)(?:\s+as\s+"?([^"]+?)"?)?$/i);
+  if (duplicate) {
+    const target = resolve(duplicate[1]);
+    return target ? {
       domain: "structure",
-      intent: { action: "create_track", role, ...(type ? { type } : {}) }
-    };
+      intent: { action: "duplicate_track", target, ...(duplicate[2] ? { name: duplicate[2].trim() } : {}) }
+    } : null;
   }
-
-  const resolvedTarget = target ?? {};
-  if (/select\s+track|select\s+\w+/.test(clause.normalized)) {
-    return { domain: "structure", intent: { action: "select_track", target: resolvedTarget } };
+  const load = clause.raw.match(/^(?:load|add|insert)\s+(?:(?:a|an|the)\s+)?(?:device\s+)?(.+?)\s+(?:on|onto|in|into|to)\s+(.+)$/i);
+  if (load) {
+    const target = resolve(load[2]);
+    const device = load[1].replace(/\s+(?:instrument|effect)$/i, "").replace(/^"|"$/g, "").trim();
+    const explicitKind = load[1].match(/\s+(instrument|effect)$/i)?.[1].toLowerCase();
+    const kind = explicitKind === "instrument" || explicitKind === "effect" ? explicitKind
+      : /^(?:reverb|delay|compressor|eq|chorus|flanger|phaser|distortion)$/i.test(device) ? "effect"
+      : /^(?:piano|synth|organ|drum kit|guitar)$/i.test(device) ? "instrument"
+      : undefined;
+    if (!target || !device || !kind) return null;
+    return { domain: "structure", intent: { action: "load_device", target, device, kind } };
   }
-  if (/\bdisarm\s+track|\bdisarm\s+\w+/.test(clause.normalized)) {
-    return { domain: "structure", intent: { action: "disarm_track", target: resolvedTarget } };
-  }
-  if (/\barm\s+track|\barm\s+\w+/.test(clause.normalized)) {
-    return { domain: "structure", intent: { action: "arm_track", target: resolvedTarget } };
-  }
-  if (/\bmute\b/.test(clause.normalized)) {
-    return { domain: "structure", intent: { action: "mute", target: resolvedTarget } };
-  }
-  if (/\b(unmute|un-mute|unumute)\b/.test(clause.normalized)) {
-    return { domain: "structure", intent: { action: "unmute", target: resolvedTarget } };
-  }
-  if (/\bsolo\b/.test(clause.normalized)) {
-    return { domain: "structure", intent: { action: "solo", target: resolvedTarget } };
-  }
-  if (/\b(unsolo|un-solo)\b/.test(clause.normalized)) {
-    return { domain: "structure", intent: { action: "unsolo", target: resolvedTarget } };
-  }
-
-  const renameMatch = clause.raw.match(
-    /(?:rename|name)\s+track\s+"?([\w\s_-]+?)"?\s+to\s+"?([\w\s_-]+?)"?$/i
-  );
-  if (renameMatch) {
-    const trackRef = parseTrackIndex(renameMatch[1]) ?? renameMatch[1].trim();
-    const renameTarget = trackRef ? { track_name: String(trackRef) } : resolvedTarget;
-    return {
-      domain: "structure",
-      intent: { action: "rename_track", target: renameTarget, name: renameMatch[2].trim() }
-    };
-  }
-
-  const deleteMatch = clause.raw.match(/(?:delete|remove)\s+track\s+"?([\w\s_-]+)"?$/i);
-  if (deleteMatch) {
-    const trackRef = parseTrackIndex(deleteMatch[1]) ?? deleteMatch[1].trim();
-    const deleteTarget = trackRef ? { track_name: String(trackRef) } : resolvedTarget;
-    return { domain: "structure", intent: { action: "remove_track", target: deleteTarget } };
-  }
-
-  const duplicateMatch = clause.raw.match(
-    /duplicate\s+track\s+"?([\w\s_-]+?)"?(?:\s+as\s+"?([\w\s_-]+)"?)?$/i
-  );
-  if (duplicateMatch) {
-    const trackRef = parseTrackIndex(duplicateMatch[1]) ?? duplicateMatch[1].trim();
-    const duplicateTarget = trackRef ? { track_name: String(trackRef) } : resolvedTarget;
-    return {
-      domain: "structure",
-      intent: {
-        action: "duplicate_track",
-        target: duplicateTarget,
-        ...(duplicateMatch[2] ? { name: duplicateMatch[2].trim() } : {})
-      }
-    };
-  }
-
-  const loadDevice = clause.raw.match(
-    /(?:load|add|insert)\s+(?:device\s+)?"?([\w\s_-]+?)"?(?:\s+on\s+track\s+[\w\s_-]+)?(?:\s+(instrument|effect))?/i
-  );
-  if (loadDevice) {
-    const rawDevice = loadDevice[1].trim();
-    const explicitKind = loadDevice[2] as "instrument" | "effect" | undefined;
-    const inferredKind = /\b(instrument|synth|piano|keys|organ|drum|drums|kit|bass|guitar)\b/i.test(rawDevice)
-      ? "instrument"
-      : "effect";
-    return {
-      domain: "structure",
-      intent: {
-        action: "load_device",
-        target: resolvedTarget,
-        device: rawDevice,
-        kind: explicitKind ?? inferredKind
-      }
-    };
-  }
-
   return null;
 };
 
 const parseMusic = (clause: Clause): Intent | null => {
-  const target = parseTarget(clause);
-  const addNote = clause.normalized.match(
-    /\badd\s+notes?\s+([a-g](?:#|b)?\d)\s+at\s+(?:beat\s+)?(-?\d+(?:\.\d+)?)\s+for\s+(\d+(?:\.\d+)?)\s+beats?\b/
+  const pitch = (value: string) => value[0].toUpperCase() + value.slice(1);
+  const addNote = clause.raw.match(
+    /^add\s+notes?\s+([a-g](?:#|b)?\d)\s+at\s+(?:beat\s+)?(-?\d+(?:\.\d+)?)\s+for\s+(\d+(?:\.\d+)?)\s+beats?\s+(?:to|on|in|into)\s+(.+)$/i
   );
-  if (addNote && target) {
+  const addTarget = addNote ? parseTrackReference(addNote[4]) : undefined;
+  if (addNote && addTarget) {
     return {
       domain: "music",
       intent: {
         action: "add_notes",
-        target,
+        target: addTarget,
         notes: [
           {
-            pitch: addNote[1].toUpperCase(),
+            pitch: pitch(addNote[1]),
             start_beats: Number(addNote[2]),
             duration_beats: Number(addNote[3])
           }
@@ -431,48 +413,50 @@ const parseMusic = (clause: Clause): Intent | null => {
     };
   }
 
-  const removeNote = clause.normalized.match(
-    /\bremove\s+notes?\s+([a-g](?:#|b)?\d)\s+(?:from|in|on)\s+/
+  const removeNote = clause.raw.match(
+    /^remove\s+notes?\s+([a-g](?:#|b)?\d)\s+(?:from|in|on)\s+(.+)$/i
   );
-  if (removeNote && target) {
+  const removeTarget = removeNote ? parseTrackReference(removeNote[2]) : undefined;
+  if (removeNote && removeTarget) {
     return {
       domain: "music",
-      intent: { action: "remove_notes", target, selection: { pitches: [removeNote[1].toUpperCase()] } }
+      intent: { action: "remove_notes", target: removeTarget, selection: { pitches: [pitch(removeNote[1])] } }
     };
   }
 
-  const editNote = clause.normalized.match(
-    /\bedit\s+notes?\s+([a-g](?:#|b)?\d)\s+(?:in|on)\s+/
+  const editNote = clause.raw.match(
+    /^edit\s+notes?\s+([a-g](?:#|b)?\d)\s+(?:in|on)\s+(.+?)\s+((?:set|transpose|quantize|humanize)\b.+)$/i
   );
+  const target = editNote ? parseTrackReference(editNote[2]) : undefined;
   if (editNote && target) {
-    const operationText = clause.normalized.slice(editNote[0].length);
+    const operationText = editNote[3].toLowerCase();
     const operations = [
       {
-        pattern: /\bset\s+velocity(?:\s+to)?\s+(0(?:\.\d+)?|1(?:\.0+)?)/,
+        pattern: /^set\s+velocity(?:\s+to)?\s+(0(?:\.\d+)?|1(?:\.0+)?)$/,
         create: (value: string) => ({ type: "set_velocity" as const, velocity: Number(value) })
       },
       {
-        pattern: /\bset\s+duration(?:\s+to)?\s+(\d+(?:\.\d+)?)/,
+        pattern: /^set\s+duration(?:\s+to)?\s+(\d+(?:\.\d+)?)(?:\s+beats?)?$/,
         create: (value: string) => ({ type: "set_duration" as const, duration_beats: Number(value) })
       },
       {
-        pattern: /\bset\s+start(?:\s+to)?\s+(-?\d+(?:\.\d+)?)/,
+        pattern: /^set\s+start(?:\s+to)?\s+(-?\d+(?:\.\d+)?)(?:\s+beats?)?$/,
         create: (value: string) => ({ type: "set_start" as const, start_beats: Number(value) })
       },
       {
-        pattern: /\bset\s+pitch(?:\s+to)?\s+([a-g](?:#|b)?\d)/,
-        create: (value: string) => ({ type: "set_pitch" as const, pitch: value.toUpperCase() })
+        pattern: /^set\s+pitch(?:\s+to)?\s+([a-g](?:#|b)?\d)$/,
+        create: (value: string) => ({ type: "set_pitch" as const, pitch: pitch(value) })
       },
       {
-        pattern: /\btranspose(?:\s+by)?\s+(-?\d+)\s*(?:semitones?)?/,
+        pattern: /^transpose(?:\s+by)?\s+(-?\d+)(?:\s+semitones?)?$/,
         create: (value: string) => ({ type: "transpose" as const, semitones: Number(value) })
       },
       {
-        pattern: /\bquantize(?:\s+strength)?\s+(0(?:\.\d+)?|1(?:\.0+)?)/,
+        pattern: /^quantize(?:\s+strength)?\s+(0(?:\.\d+)?|1(?:\.0+)?)$/,
         create: (value: string) => ({ type: "quantize" as const, strength: Number(value) })
       },
       {
-        pattern: /\bhumanize(?:\s+amount)?\s+(0(?:\.\d+)?|1(?:\.0+)?)/,
+        pattern: /^humanize(?:\s+amount)?\s+(0(?:\.\d+)?|1(?:\.0+)?)$/,
         create: (value: string) => ({ type: "humanize" as const, amount: Number(value) })
       }
     ];
@@ -484,7 +468,7 @@ const parseMusic = (clause: Clause): Intent | null => {
           intent: {
             action: "edit_notes",
             target,
-            selection: { pitches: [editNote[1].toUpperCase()] },
+            selection: { pitches: [pitch(editNote[1])] },
             operation: create(match[1])
           }
         } as Intent;
@@ -492,22 +476,24 @@ const parseMusic = (clause: Clause): Intent | null => {
     }
   }
 
-  const quantize = clause.normalized.match(/quantize(?:\s+.*)?(?:\s+(?:strength|amount)?\s*(0(?:\.\d+)?|1(?:\.0+)?))?/);
-  if (quantize && target) {
-    const strength = parseNumber(quantize[1]) ?? 0.8;
-    return { domain: "music", intent: { action: "quantize", target, strength } };
+  const quantize = clause.raw.match(/^quantize\s+(.+?)(?:\s+(?:strength|amount)\s+(0(?:\.\d+)?|1(?:\.0+)?))?$/i);
+  const quantizeTarget = quantize ? parseTrackReference(quantize[1]) : undefined;
+  if (quantize && quantizeTarget) {
+    const strength = parseNumber(quantize[2]) ?? 0.8;
+    return { domain: "music", intent: { action: "quantize", target: quantizeTarget, strength } };
   }
-  const transpose = clause.normalized.match(/transpose(?:\s+.*)?\s+(?:by\s+)?(-?\d+)/);
-  if (transpose && target) {
-    return { domain: "music", intent: { action: "transpose", target, semitones: Number(transpose[1]) } };
+  const transpose = clause.raw.match(/^transpose\s+(.+?)\s+(?:by\s+)?(-?\d+)(?:\s+semitones?)?$/i);
+  const transposeTarget = transpose ? parseTrackReference(transpose[1]) : undefined;
+  if (transpose && transposeTarget) {
+    return { domain: "music", intent: { action: "transpose", target: transposeTarget, semitones: Number(transpose[2]) } };
   }
-  const keySig = clause.normalized.match(/key\s+signature\s+([a-g](?:#|b)?)(?:\s+(major|minor))?/);
+  const keySig = clause.normalized.match(/^(?:set\s+)?key\s+signature\s+([a-g](?:#|b)?)(?:\s+(major|minor))?$/);
   if (keySig) {
     return {
       domain: "music",
       intent: {
         action: "set_key_signature",
-        key: keySig[1].toUpperCase(),
+        key: pitch(keySig[1]),
         scale: (keySig[2] as "major" | "minor") ?? "major"
       }
     };
@@ -516,26 +502,30 @@ const parseMusic = (clause: Clause): Intent | null => {
 };
 
 const parseHarmony = (clause: Clause): Intent | null => {
-  const target = parseTarget(clause);
-  const setKey = clause.normalized.match(/set\s+key\s+([a-g](?:#|b)?)(?:\s+([a-z_]+))?/);
+  const setKey = clause.normalized.match(/^set\s+key\s+([a-g](?:#|b)?)(?:\s+([a-z_]+))?$/);
   if (setKey) {
     const scale = (setKey[2] as ScaleType | undefined) ?? "major";
-    const scaleValue = scaleValues.includes(scale) ? scale : "major";
+    if (!scaleValues.includes(scale)) return null;
     const tonic = normalizePitchClass(setKey[1]);
     if (!tonic) return null;
     return {
       domain: "harmony",
-      intent: { action: "set_key", tonic, scale: scaleValue }
+      intent: { action: "set_key", tonic, scale }
     };
   }
-  const setChord = clause.raw.match(/set\s+chord\s+"?([\w#b\/\s]+)"?/i);
+  const suffix = clause.raw.match(/\s+(?:on|in)\s+(.+)$/i);
+  const target = suffix ? parseTrackReference(suffix[1]) : undefined;
+  if (suffix && !target) return null;
+  const raw = suffix ? clause.raw.slice(0, suffix.index) : clause.raw;
+  const normalized = raw.toLowerCase();
+  const setChord = raw.match(/^set\s+chord\s+"?([\w#b\/\s]+)"?$/i);
   if (setChord) {
     return {
       domain: "harmony",
       intent: { action: "set_chord", chord: setChord[1].trim(), target }
     };
   }
-  const progression = clause.raw.match(/chord\s+progression\s+"?([\w\s,]+)"?/i);
+  const progression = raw.match(/^(?:set\s+)?chord\s+progression\s+"?([\w\s,]+)"?$/i);
   if (progression) {
     const progressionList = progression[1]
       .split(/[,\s]+/)
@@ -551,14 +541,14 @@ const parseHarmony = (clause: Clause): Intent | null => {
       }
     };
   }
-  const pitchRange = clause.normalized.match(/pitch\s+range\s+([a-g][#b]?[0-9])\s+to\s+([a-g][#b]?[0-9])/);
+  const pitchRange = normalized.match(/^(?:set\s+)?pitch\s+range\s+([a-g][#b]?[0-9])\s+to\s+([a-g][#b]?[0-9])$/);
   if (pitchRange) {
     return {
       domain: "harmony",
       intent: {
         action: "set_pitch_range",
-        low: pitchRange[1].toUpperCase(),
-        high: pitchRange[2].toUpperCase(),
+        low: pitchRange[1][0].toUpperCase() + pitchRange[1].slice(1),
+        high: pitchRange[2][0].toUpperCase() + pitchRange[2].slice(1),
         target
       }
     };
@@ -581,9 +571,14 @@ type ParameterSeriesDomain =
   | "time_point";
 
 const parseParameterSeries = (clause: Clause, domain: ParameterSeriesDomain): Intent | null => {
-  const normalized = clause.normalized;
-  const target = parseTarget(clause);
   const domainText = domain.replace("_", " ");
+  if (!new RegExp(`^(?:set|transform|map) ${domainText}\\b`).test(clause.normalized)) return null;
+  const targetSuffix = clause.normalized.match(/\s+(?:on|in)\s+(.+)$/);
+  const target = targetSuffix ? parseTrackReference(targetSuffix[1]) : undefined;
+  if (targetSuffix && !target) return null;
+  const normalized = targetSuffix
+    ? clause.normalized.slice(0, targetSuffix.index)
+    : clause.normalized;
 
   const setValue = normalized.match(new RegExp(`^set ${domainText} value(?:\\s+to)?\\s+(.+)$`));
   if (setValue) {
@@ -631,16 +626,20 @@ const parseParameterSeries = (clause: Clause, domain: ParameterSeriesDomain): In
 };
 
 const parseRhythm = (clause: Clause): Intent | null => {
-  const target = parseTarget(clause);
-  const groove = clause.normalized.match(/groove\s+(straight|swing|shuffle|triplet|dotted)/);
+  const suffix = clause.raw.match(/\s+(?:on|in)\s+(.+)$/i);
+  const target = suffix ? parseTrackReference(suffix[1]) : undefined;
+  if (suffix && !target) return null;
+  const raw = suffix ? clause.raw.slice(0, suffix.index) : clause.raw;
+  const normalized = raw.toLowerCase();
+  const groove = normalized.match(/^(?:set\s+)?groove\s+(straight|swing|shuffle|triplet|dotted)$/);
   if (groove) {
     return { domain: "rhythm", intent: { action: "set_groove", groove: groove[1] as any, target } };
   }
-  const swing = clause.normalized.match(/swing\s*(?:to|=)?\s*(0(?:\.\d+)?|1(?:\.0+)?)/);
+  const swing = normalized.match(/^(?:set\s+)?swing\s*(?:to|=)?\s*(0(?:\.\d+)?|1(?:\.0+)?)$/);
   if (swing) {
     return { domain: "rhythm", intent: { action: "set_swing", amount: Number(swing[1]), target } };
   }
-  const subdivision = clause.normalized.match(/subdivision\s*(1\/\d+|1\/8t|1\/16t)/);
+  const subdivision = normalized.match(/^(?:set\s+)?subdivision\s*(1\/\d+t?)$/);
   if (subdivision) {
     const value = subdivision[1].toUpperCase();
     const normalized = value === "1/8T" || value === "1/16T" ? value : value;
@@ -648,15 +647,15 @@ const parseRhythm = (clause: Clause): Intent | null => {
       return { domain: "rhythm", intent: { action: "set_subdivision", subdivision: normalized as any, target } };
     }
   }
-  const pattern = clause.raw.match(/rhythm\s+pattern\s+"?([\w\s_-]+)"?/i);
+  const pattern = raw.match(/^(?:set\s+)?rhythm\s+pattern\s+"?([\w\s_-]+)"?$/i);
   if (pattern) {
     return { domain: "rhythm", intent: { action: "set_rhythm_pattern", pattern: pattern[1].trim(), target } };
   }
-  const density = clause.normalized.match(/density\s*(0(?:\.\d+)?|1(?:\.0+)?)/);
+  const density = normalized.match(/^(?:set\s+)?density\s*(0(?:\.\d+)?|1(?:\.0+)?)$/);
   if (density) {
     return { domain: "rhythm", intent: { action: "set_density", density: Number(density[1]), target } };
   }
-  const humanize = clause.normalized.match(/humanize\s+timing\s*(0(?:\.\d+)?|1(?:\.0+)?)/);
+  const humanize = normalized.match(/^humanize\s+timing\s*(0(?:\.\d+)?|1(?:\.0+)?)$/);
   if (humanize) {
     return { domain: "rhythm", intent: { action: "humanize_timing", amount: Number(humanize[1]), target } };
   }
@@ -664,16 +663,16 @@ const parseRhythm = (clause: Clause): Intent | null => {
 };
 
 const parsePerformance = (clause: Clause): Intent | null => {
-  const target = parseTarget(clause);
-  const scene = clause.raw.match(/trigger\s+scene\s+"?([\w\s_-]+)"?/i);
+  const scene = clause.raw.match(/^trigger\s+scene\s+"?([\w\s_-]+)"?$/i);
   if (scene) {
     return { domain: "performance", intent: { action: "trigger_scene", scene_name: scene[1].trim() } };
   }
-  const clip = clause.raw.match(/trigger\s+clip\s+"?([\w\s_-]+)"?/i);
-  if (clip && target) {
+  const clip = clause.raw.match(/^trigger\s+clip\s+"?([^"]+?)"?\s+(?:on|in)\s+(.+)$/i);
+  const clipTarget = clip ? parseTrackReference(clip[2]) : undefined;
+  if (clip && clipTarget) {
     return {
       domain: "performance",
-      intent: { action: "trigger_clip", clip_name: clip[1].trim(), target }
+      intent: { action: "trigger_clip", clip_name: clip[1].trim(), target: clipTarget }
     };
   }
   return null;
@@ -727,6 +726,7 @@ const parseParameters = (clause: Clause): Intent | null => {
   const action = verb === "set" ? "set"
     : /^(increase|raise|turn up)$/.test(verb) ? "increase" : "decrease";
   if ((action === "set") !== (match[3].toLowerCase() === "to")) return null;
+  if (action !== "set" && Number(match[4]) <= 0) return null;
 
   const parts = match[2].split(/\s+(?:on|in|with|of)\s+/i).map((part) => part.trim());
   if (parts.length < 2 || parts.length > 3) return null;
@@ -750,22 +750,17 @@ const parseParameters = (clause: Clause): Intent | null => {
 };
 
 const parseTimbre = (clause: Clause): Intent | null => {
-  const target = parseTarget(clause);
-  const adjectiveMatches = Object.keys(timbreAdjectives).filter((key) =>
-    clause.normalized.includes(key)
-  );
-  const attributeMatches = timbreAttributes.filter((attr) => clause.normalized.includes(attr));
-  const mappedAttributes = adjectiveMatches.map((key) => timbreAdjectives[key]);
-  const allAttributes = [...new Set([...attributeMatches, ...mappedAttributes])];
-
-  if (allAttributes.length === 0) return null;
-
-  const amountMatch = clause.normalized.match(/(-?\d+(?:\.\d+)?)/);
-  const amountValue = parseNumber(amountMatch?.[1]) ?? 0.2;
-  const direction =
-    /\b(less|decrease|reduce|lower|quieter)\b/.test(clause.normalized) ? -1 : 1;
-  const moreLessBoost = /\bmore\b/.test(clause.normalized) ? 0.35 : 0.2;
-  const inferredAmount = amountMatch ? amountValue : moreLessBoost;
+  const match = clause.raw.match(/^make\s+(.+?)\s+((?:(?:more|less)\s+)?[a-z]+(?:\s+(?:and\s+)?[a-z]+)*)(?:\s+by\s+(\d+(?:\.\d+)?))?$/i);
+  if (!match) return null;
+  const target = parseTrackReference(match[1]);
+  if (!target) return null;
+  const words = match[2].toLowerCase().split(/\s+/);
+  if (words.some((word) => !["and", "more", "less"].includes(word) && !timbreAdjectives[word])) return null;
+  if (words.includes("more") && words.includes("less")) return null;
+  const allAttributes = [...new Set(words.map((word) => timbreAdjectives[word]).filter(Boolean))];
+  if (!allAttributes.length) return null;
+  const direction = words.includes("less") ? -1 : 1;
+  const inferredAmount = parseNumber(match[3]) ?? (words.includes("more") ? 0.35 : 0.2);
 
   if (allAttributes.length === 1) {
     return {
@@ -789,11 +784,20 @@ const parseTimbre = (clause: Clause): Intent | null => {
   };
 };
 
-const parseClause = (clause: Clause): Intent | null =>
-  parseParameters(clause) ||
-  parseTransport(clause) ||
-  parseMusic(clause) ||
-  parseStructure(clause) ||
+const parseClause = (clause: Clause, context?: TargetRef): Intent | null => {
+  const unquoted = clause.normalized.replace(/"[^"]*"/g, "");
+  if (!/^(?:query|describe|summarize)\b/.test(unquoted) &&
+      /\b(?:across|between|below|above)\b/.test(unquoted)) return null;
+  const parameter = parseParameters(clause);
+  if (parameter) return parameter;
+  if (/^(?:increase|decrease|raise|lower|reduce|turn up|turn down)\b/i.test(clause.normalized)) return null;
+  if (/^(?:move|route|copy)\b/i.test(clause.normalized)) return null;
+  const music = parseMusic(clause);
+  if (music) return music;
+  const structure = parseStructure(clause, context);
+  if (structure) return structure;
+  if (/^(?:create|add|new|select|arm|disarm|mute|unmute|un-mute|solo|unsolo|un-solo|rename|name|delete|remove|duplicate|load|insert)\b/i.test(clause.normalized)) return null;
+  return parseTransport(clause) ||
   parseHarmony(clause) ||
   parseParameterSeries(clause, "pitch") ||
   parseParameterSeries(clause, "duration") ||
@@ -805,6 +809,7 @@ const parseClause = (clause: Clause): Intent | null =>
   parsePerformance(clause) ||
   parseAnalysis(clause) ||
   parseTimbre(clause);
+};
 
 const omitUndefined = <T>(value: T): T => {
   if (Array.isArray(value)) {
@@ -823,25 +828,39 @@ const omitUndefined = <T>(value: T): T => {
 export const parseTextToIntents = (text: string): ParseResult => {
   const intents: Intent[] = [];
   const errors: string[] = [];
+  let context: TargetRef | undefined;
 
+  if ((text.match(/"/g)?.length ?? 0) % 2 !== 0) {
+    return { intents: [], errors: ["Unclosed quotation mark"] };
+  }
+  const unquotedText = text.replace(/"[^"]*"/g, '""').trim();
+  if (/\b(?:and|then)\s*[.!?;]*$/i.test(unquotedText) &&
+      !/^(?:\s|[;.!?]|\band\b|\bthen\b)*$/i.test(unquotedText)) {
+    return { intents: [], errors: ["Incomplete command after conjunction"] };
+  }
   for (const clause of splitClauses(text)) {
-    const parsed = parseClause(clause);
+    const parsed = parseClause(clause, context);
     if (!parsed) {
       errors.push(`Unrecognized intent: "${clause.raw.trim()}"`);
+      context = undefined;
       continue;
     }
 
     const validation = IntentSchema.safeParse(parsed);
     if (!validation.success) {
       errors.push(`Invalid intent from clause: "${clause.raw.trim()}"`);
+      context = undefined;
       continue;
     }
 
     intents.push(omitUndefined(validation.data));
+    context = parsed.domain === "structure" &&
+      ["select_track", "arm_track", "disarm_track", "mute", "unmute", "solo", "unsolo"].includes(parsed.intent.action) &&
+      "target" in parsed.intent ? parsed.intent.target : undefined;
   }
 
   return {
-    intents,
+    intents: errors.length ? [] : intents,
     errors: errors.length ? errors : undefined
   };
 };

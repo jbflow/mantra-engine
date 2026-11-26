@@ -19,6 +19,7 @@ test("handles raw and typed messages, reuses open connections, and sends intents
   Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: WebSocket });
   const server = new WebSocketServer({ port: 0 });
   let connectionCount = 0;
+  let intentMessageCount = 0;
   let receivedMessage: Record<string, unknown> | undefined;
   let engine: MantraEngine | undefined;
   let resolveReceived!: (message: Record<string, unknown>) => void;
@@ -58,7 +59,10 @@ test("handles raw and typed messages, reuses open connections, and sends intents
     connectionCount += 1;
     socket.on("message", (data) => {
       receivedMessage = JSON.parse(data.toString());
-      if (receivedMessage.type === "intent") resolveReceived(receivedMessage);
+      if (receivedMessage.type === "intent") {
+        intentMessageCount += 1;
+        resolveReceived(receivedMessage);
+      }
       if (receivedMessage.type === "midi") resolveMidiReceived(receivedMessage);
     });
     socket.send("not-json");
@@ -95,12 +99,14 @@ test("handles raw and typed messages, reuses open connections, and sends intents
     assert.equal(connectionCount, 1);
     assert.ok(rawValues.includes("not-json"));
 
+    assert.ok(engine.sendText("play and move the bass to drums").errors);
     engine.sendIntents({ domain: "transport", intent: { action: "play" } });
     assert.deepEqual(await received, {
       type: "intent",
       payload: { domain: "transport", intent: { action: "play" } },
       source: "test"
     });
+    assert.equal(intentMessageCount, 1);
 
     const midiAction = {
       port: "Ableton",

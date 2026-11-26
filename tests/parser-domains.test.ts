@@ -53,7 +53,7 @@ const cases: Array<{ domain: string; action: string; text: string }> = [
   { domain: "rhythm", action: "set_density", text: "density 0.7" },
   { domain: "rhythm", action: "humanize_timing", text: "humanize timing 0.3" },
   { domain: "performance", action: "trigger_scene", text: "trigger scene chorus" },
-  { domain: "performance", action: "trigger_clip", text: "trigger clip bass" },
+  { domain: "performance", action: "trigger_clip", text: "trigger clip bass on piano" },
   { domain: "analysis", action: "summarize", text: "summarize bass in detail" },
   { domain: "analysis", action: "describe", text: "describe bass focusing on rhythm" },
   { domain: "analysis", action: "query", text: "query what is happening with bass as json" },
