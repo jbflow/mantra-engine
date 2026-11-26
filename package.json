@@ -21,7 +21,7 @@
     "test:coverage": "node --import tsx --experimental-test-coverage --test tests/*.test.ts"
   },
   "dependencies": {
-    "musical-intent-protocol": "git+https://github.com/jbflow/musical-intent-protocol.git#main"
+    "musical-intent-protocol": "git+https://github.com/jbflow/musical-intent-protocol.git#28fbdd26433a2a3f0e1e88bfd54dd33e87abb059"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",

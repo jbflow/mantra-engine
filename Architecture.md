@@ -20,7 +20,7 @@ Mantra Remote Script (Python)
 
 - **Host-agnostic**: No DAW-specific logic (Ableton integration is in separate repo)
 - **Browser-first**: Core engine runs in browsers and Node.js
-- **Schema-driven**: All parsing validated against MIP v0.2 schema
+- **Schema-driven**: All parsing validated against MIP v0.3 schema
 - **Minimal dependencies**: Only `musical-intent-protocol` and `zod`
 
 ## Project Structure
@@ -88,12 +88,13 @@ engine.disconnect();
 
 ## Supported Domains
 
-All MIP v0.2 domains:
+MIP v0.3 domains:
 - `transport` - Play, stop, record, tempo, navigation
 - `structure` - Tracks, clips, devices
 - `music` - Notes, quantization, transposition
 - `performance` - Scene/clip triggering
 - `analysis` - Queries and introspection
+- `parameters` - Explicit device parameter changes
 - Plus 10+ more specialized domains
 
 ## Example Usage

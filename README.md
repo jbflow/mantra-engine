@@ -41,5 +41,5 @@ Send text from Node to a running WebSocket server:
 
 ## Notes
 
-- NLP parsing is rule-based and covers every domain/action in MIP v0.2. If a phrase is ambiguous, the parser returns a validation error.
-- The engine installs `musical-intent-protocol` from the `main` branch of `jbflow/musical-intent-protocol` on GitHub.
+- NLP parsing is rule-based and validates intents against MIP v0.3. Ambiguous or unsupported phrases return errors.
+- The engine pins `musical-intent-protocol` to a MIP v0.3 commit on GitHub.

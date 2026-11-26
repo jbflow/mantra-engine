@@ -52,9 +52,30 @@ test("preserves series values and nested note edit operations", () => {
     domain: "pitch",
     intent: { action: "set_series", series: [60, 62, 64] }
   });
+
   assert.deepEqual(parseTextToIntents("transform pitch series rotate by 2").intents[0], {
     domain: "pitch",
     intent: { action: "transform_series", operation: "rotate", amount: 2 }
+  });
+
+  test("parses explicit MIP device parameters and validates numeric values", () => {
+    assert.deepEqual(parseTextToIntents("increase attack on Compressor on the bass track by 5 ms"), {
+      intents: [{
+        domain: "parameters",
+        intent: {
+          action: "increase",
+          target: { role: "bass", device_name: "Compressor", parameter_name: "attack" },
+          amount: 5,
+          unit: "ms"
+        }
+      }],
+      errors: undefined
+    });
+    assert.deepEqual(parseTextToIntents("set volume on vocals to -6 dB").intents, [{
+      domain: "parameters",
+      intent: { action: "set", target: { role: "vocal", parameter_name: "volume" }, amount: -6, unit: "db" }
+    }]);
+    assert.ok(parseTextToIntents("increase attack on bass").errors);
   });
   assert.deepEqual(parseTextToIntents("edit note C4 in piano set velocity to 0.8").intents[0], {
     domain: "music",

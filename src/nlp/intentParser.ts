@@ -2,6 +2,7 @@ import {
   IntentSchema,
   type Domain,
   type Intent,
+  type ParametersTarget,
   type ParameterValue,
   type PitchClass,
   type Role,
@@ -191,6 +192,24 @@ const parseNumber = (value?: string): number | undefined => {
   if (!value) return undefined;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
+};
+
+const parseTrackReference = (text: string): TargetRef | undefined => {
+  const phrase = text.trim().replace(/^(?:the|a|an)\s+/i, "").trim();
+  const trackFirst = phrase.match(/^track\s+"?([^"]+?)"?$/i);
+  if (trackFirst) {
+    const name = trackFirst[1].trim();
+    if (parseTrackIndex(name)) return undefined;
+    return name ? { track_name: name } : undefined;
+  }
+  const name = phrase.replace(/\s+track$/i, "").trim();
+  const normalized = name.toLowerCase().replace(/\s+/g, "_");
+  const role = normalized === "vocals" ? "vocal" : normalized;
+  if (roleValues.includes(role as Role)) return { role: role as Role };
+  if (/\s+track$/i.test(phrase) && name && !parseTrackIndex(name)) {
+    return { track_name: name.replace(/^"|"$/g, "") };
+  }
+  return undefined;
 };
 
 const normalizePitchClass = (value?: string): PitchClass | undefined => {
@@ -699,6 +718,37 @@ const parseAnalysis = (clause: Clause): Intent | null => {
   return null;
 };
 
+const parseParameters = (clause: Clause): Intent | null => {
+  const match = clause.raw.trim().match(
+    /^(increase|decrease|raise|lower|reduce|set|turn up|turn down)\s+(?:the\s+)?(.+?)\s+(by|to)\s+(-?\d+(?:\.\d+)?)\s*(db|hz|ms|%)?$/i
+  );
+  if (!match) return null;
+  const verb = match[1].toLowerCase();
+  const action = verb === "set" ? "set"
+    : /^(increase|raise|turn up)$/.test(verb) ? "increase" : "decrease";
+  if ((action === "set") !== (match[3].toLowerCase() === "to")) return null;
+
+  const parts = match[2].split(/\s+(?:on|in|with|of)\s+/i).map((part) => part.trim());
+  if (parts.length < 2 || parts.length > 3) return null;
+  const track = parseTrackReference(parts[parts.length - 1]);
+  if (!track) return null;
+  const parameter = parts[0].replace(/^the\s+/i, "").replace(/\s+parameter$/i, "").trim();
+  const device = parts.length === 3
+    ? parts[1].replace(/^the\s+/i, "").replace(/\s+device$/i, "").trim()
+    : undefined;
+  if (!parameter || (parts.length === 3 && !device)) return null;
+  const target: ParametersTarget = {
+    ...track,
+    parameter_name: parameter,
+    ...(device ? { device_name: device } : {})
+  };
+  const unit = match[5]?.toLowerCase() as "db" | "hz" | "ms" | "%" | undefined;
+  return {
+    domain: "parameters",
+    intent: { action, target, amount: Number(match[4]), ...(unit ? { unit } : {}) }
+  };
+};
+
 const parseTimbre = (clause: Clause): Intent | null => {
   const target = parseTarget(clause);
   const adjectiveMatches = Object.keys(timbreAdjectives).filter((key) =>
@@ -740,6 +790,7 @@ const parseTimbre = (clause: Clause): Intent | null => {
 };
 
 const parseClause = (clause: Clause): Intent | null =>
+  parseParameters(clause) ||
   parseTransport(clause) ||
   parseMusic(clause) ||
   parseStructure(clause) ||
@@ -809,5 +860,6 @@ export const supportedDomains: Domain[] = [
   "articulation",
   "instrumentation",
   "time_point",
-  "timbre"
+  "timbre",
+  "parameters"
 ];

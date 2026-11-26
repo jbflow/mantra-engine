@@ -21,7 +21,8 @@ test("exports the engine API and the complete MIP domain list", () => {
     "articulation",
     "instrumentation",
     "time_point",
-    "timbre"
+    "timbre",
+    "parameters"
   ]);
   assert.equal(config.wsUrl, "ws://localhost:1979");
 });

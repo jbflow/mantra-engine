@@ -11,10 +11,25 @@ test("normalizes valid intents into MIP envelopes", () => {
 
   assert.equal(result.issues, undefined);
   assert.equal(result.envelopes.length, 1);
-  assert.equal(result.envelopes[0].version, "0.2");
+  assert.equal(result.envelopes[0].version, "0.3");
   assert.equal(result.envelopes[0].source, "ui");
   assert.equal(result.envelopes[0].domain, "transport");
   assert.deepEqual(result.envelopes[0].intent, { action: "play" });
+});
+
+test("validates and normalizes MIP 0.3 parameter intents", () => {
+  const result = validateAndNormalize({
+    domain: "parameters",
+    intent: {
+      action: "set",
+      target: { role: "vocal", parameter_name: "volume" },
+      amount: -6,
+      unit: "db"
+    }
+  });
+  assert.equal(result.issues, undefined);
+  assert.equal(result.envelopes[0].version, "0.3");
+  assert.equal(result.envelopes[0].domain, "parameters");
 });
 
 test("uses the default source for intent batches and accepts empty batches", () => {
