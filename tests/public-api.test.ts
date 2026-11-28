@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { config } from "../src/config.js";
 import { MantraEngine, parseTextToIntents, supportedDomains, validateAndNormalize } from "../src/index.js";
 
 test("exports the engine API and the complete MIP domain list", () => {
@@ -24,5 +23,4 @@ test("exports the engine API and the complete MIP domain list", () => {
     "timbre",
     "parameters"
   ]);
-  assert.equal(config.wsUrl, "ws://localhost:1979");
 });

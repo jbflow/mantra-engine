@@ -6,11 +6,12 @@
 
 ```
 Mantra Frontend (NextJS)
-       ↓
+  - AppController coordinates interpretation and requests
+  - DawSocket owns the Ableton WebSocket connection
+       ↓ parseTextToIntents / MIP intent
 Mantra Engine (TypeScript)
   - parseTextToIntents() → Intent[]
   - validateAndNormalize() → Envelope[]
-  - MantraEngine client (optional WebSocket wrapper)
        ↓
 Mantra Remote Script (Python)
   - Executes intents in Ableton Live
@@ -28,7 +29,7 @@ Mantra Remote Script (Python)
 ```
 src/
 ├── client/
-│   └── engine.ts              # WebSocket client wrapper (optional)
+│   └── engine.ts              # Host-agnostic parsing facade
 ├── nlp/
 │   ├── intentParser.ts        # Main NLP parser
 │   └── domains/               # Domain-specific parsers
@@ -38,7 +39,7 @@ src/
 │   ├── state.ts               # Session state scaffolding
 │   └── logger.ts              # Structured logging
 ├── types/
-│   └── protocol.ts            # WebSocket message types
+│   └── protocol.ts            # MIDI action payload type
 └── index.ts                   # Public exports
 ```
 
@@ -65,25 +66,11 @@ supportedDomains(): string[]
 validateAndNormalize(intent: Intent): Envelope | ValidationError
 ```
 
-### Optional WebSocket Client
+### Parsing Facade
 
 ```typescript
-// Connect to remote script server
-const engine = new MantraEngine({
-  url: "ws://localhost:1978",
-  source: "frontend",
-  handlers: {
-    onOpen: () => {},
-    onAck: (message) => {},
-    onError: (message) => {},
-    onResult: (message) => {}
-  }
-});
-
-await engine.connect();
-engine.sendText("play");  // Parse + send in one call
-engine.sendIntents(intents);
-engine.disconnect();
+const engine = new MantraEngine();
+const result = engine.parseText("play");
 ```
 
 ## Supported Domains
@@ -113,31 +100,42 @@ console.log(result.intents);
 // 2. Validate intents
 const { valid } = validateAndNormalize(result.intents);
 
-// 3. Send via WebSocket (optional)
-const engine = new MantraEngine({ url: "ws://localhost:1978" });
-await engine.connect();
-engine.sendIntents(valid);
+// 3. The host application sends validated intents through its transport.
 ```
 
 ## Message Protocol
 
-The optional WebSocket client uses this protocol to communicate with the Remote Script:
+Mantra Engine does not own or define a transport protocol. The frontend's `DawSocket`
+sends `intent` requests to the Remote Script, which responds with `ack`, `result`,
+`error`, or `pong` messages. The acknowledgement contains the IDs assigned to the
+accepted intents; each result uses the matching ID for correlation.
 
 **Client → Server**:
 ```json
 {
   "type": "intent",
   "payload": {"domain": "transport", "intent": {"action": "play"}},
-  "source": "frontend"
+  "source": "ui"
 }
 ```
 
 **Server → Client**:
 ```json
 {
+  "type": "ack",
+  "ids": ["..."],
+  "status": "accepted"
+}
+{
   "type": "result",
   "id": "...",
-  "status": "ok"
+  "status": "ok",
+  "details": {}
+}
+{
+  "type": "error",
+  "code": "BAD_REQUEST",
+  "message": "..."
 }
 ```
 
